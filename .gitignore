@@ -53,6 +53,9 @@ desktop.ini
 docs/
 site/
 
+# Release archives
+*.zip
+
 # User data
 Profiles/
 

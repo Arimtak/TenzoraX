@@ -7,8 +7,7 @@
         mc:Ignorable="d"
          Title="{Binding Title_Window}" Height="720" Width="1100"
         Background="{StaticResource BgBrush}" Foreground="{StaticResource TextBrush}"
-        WindowStartupLocation="CenterScreen" ResizeMode="CanMinimize"
-        Icon="assets/icons/app.ico">
+        WindowStartupLocation="CenterScreen" ResizeMode="CanMinimize">
 
     <Window.Resources>
         <!-- Style for circular controller buttons -->

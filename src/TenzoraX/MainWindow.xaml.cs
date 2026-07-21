@@ -167,40 +167,18 @@ namespace TenzoraX
 
         private void LoadControllerBackground()
         {
-            if (string.IsNullOrEmpty(_settings.ControllerImagePath))
+            string defaultImgPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "icons", "xbox-360.png");
+            if (!string.IsNullOrEmpty(_settings.ControllerImagePath) && File.Exists(_settings.ControllerImagePath))
             {
-                try
-                {
-                    ImgController.Source = new BitmapImage(new Uri("pack://application:,,,/assets/icons/xbox-360.png"));
-                }
-                catch
-                {
-                    string defaultPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "icons", "xbox-360.png");
-                    if (File.Exists(defaultPath))
-                        ImgController.Source = new BitmapImage(new Uri(defaultPath));
-                }
+                try { ImgController.Source = new BitmapImage(new Uri(_settings.ControllerImagePath)); } catch { }
             }
-            else
+            if (ImgController.Source == null && File.Exists(defaultImgPath))
             {
-                try
-                {
-                    if (File.Exists(_settings.ControllerImagePath))
-                    {
-                        ImgController.Source = new BitmapImage(new Uri(_settings.ControllerImagePath));
-                    }
-                    else
-                    {
-                        ImgController.Source = new BitmapImage(new Uri("pack://application:,,,/assets/icons/xbox-360.png"));
-                    }
-                }
-                catch
-                {
-                    try
-                    {
-                        ImgController.Source = new BitmapImage(new Uri("pack://application:,,,/assets/icons/xbox-360.png"));
-                    }
-                    catch { }
-                }
+                try { ImgController.Source = new BitmapImage(new Uri(defaultImgPath)); } catch { }
+            }
+            if (ImgController.Source == null)
+            {
+                try { ImgController.Source = new BitmapImage(new Uri("pack://application:,,,/assets/icons/xbox-360.png")); } catch { }
             }
 
             double scale = _settings.ControllerScale;
@@ -1328,16 +1306,25 @@ namespace TenzoraX
 
         private ImageSource CreateControllerIconSource()
         {
-            try
+            string icoPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "icons", "app.ico");
+            if (System.IO.File.Exists(icoPath))
             {
-                var uri = new Uri("pack://application:,,,/assets/icons/app.ico", UriKind.RelativeOrAbsolute);
-                return BitmapFrame.Create(uri);
+                try
+                {
+                    var icon = new System.Drawing.Icon(icoPath);
+                    return Imaging.CreateBitmapSourceFromHIcon(icon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                }
+                catch { }
             }
-            catch
+            // Fallback: draw a simple placeholder
+            var bmp = new System.Drawing.Bitmap(32, 32);
+            using (var g = System.Drawing.Graphics.FromImage(bmp))
             {
-                var icon = CreateControllerIcon();
-                return Imaging.CreateBitmapSourceFromHIcon(icon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                g.Clear(System.Drawing.Color.Transparent);
+                g.FillRectangle(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(40, 40, 50)), 4, 10, 24, 14);
+                g.FillEllipse(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(0, 210, 255)), 12, 14, 8, 8);
             }
+            return Imaging.CreateBitmapSourceFromHIcon(bmp.GetHicon(), Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
         }
 
         private void HideToTray(bool showTip)

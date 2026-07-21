@@ -15,10 +15,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Resource Include="..\..\assets\icons\app.ico" />
-    <Resource Include="..\..\assets\icons\xbox-360.png">
+    <Content Include="..\..\assets\icons\**">
+      <Link>assets\icons\%(RecursiveDir)%(FileName)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Resource>
+    </Content>
   </ItemGroup>
 
 </Project>
