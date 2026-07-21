@@ -1,0 +1,62 @@
+# .NET build outputs
+bin/
+obj/
+*.exe
+*.dll
+*.pdb
+*.app
+*.ipa
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userprefs
+*.userosscache
+*.sln.docstates
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# Rider
+.idea/
+*.sln.iml
+
+# NuGet
+packages/
+*.nupkg
+*.snk
+
+# Publish outputs
+publish/
+publish_final/
+publish_ding/
+publish_icon/
+publish_hd/
+publish_new/
+publish_v2/
+publish_v3/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.cache
+
+# Documentation builds
+docs/
+site/
+
+# User data
+Profiles/
+
+# Old backups
+TenzoraX_Program/
+TenzoraX_Program.zip
+TenzoraX_Source.zip
