@@ -954,10 +954,6 @@ namespace TenzoraX
                 SaveSettings();
             }
 
-            System.IO.File.WriteAllText(
-                System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "load_debug.log"),
-                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] LoadSettings: fileExists={File.Exists(ConfigFilePath)}, count={_settings.RelativeButtonPositions.Count}\n" +
-                string.Join("\n", _settings.RelativeButtonPositions.Select(kv => $"  {kv.Key}={kv.Value}")));
         }
 
         private void SetDefaultRelativePositions()
@@ -992,10 +988,6 @@ namespace TenzoraX
             _settings.ButtonPositions.Clear();
             SetDefaultRelativePositions();
             SaveSettings();
-            System.IO.File.WriteAllText(
-                System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "reset_debug.log"),
-                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] ResetPositions: count={_settings.RelativeButtonPositions.Count}\n" +
-                string.Join("\n", _settings.RelativeButtonPositions.Select(kv => $"  {kv.Key}={kv.Value}")));
             ReapplyButtonPositions();
         }
 
@@ -1006,12 +998,7 @@ namespace TenzoraX
                 string json = JsonSerializer.Serialize(_settings, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(ConfigFilePath, json);
             }
-            catch (Exception ex)
-            {
-                System.IO.File.WriteAllText(
-                    System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "save_error.log"),
-                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] SaveSettings: {ex.Message}\n{ex.StackTrace}");
-            }
+            catch { }
         }
 
         private void InitLanguage()
