@@ -927,6 +927,35 @@ namespace TenzoraX
                 _settings = new AppSettings();
                 SaveSettings();
             }
+
+            if (_settings.RelativeButtonPositions.Count == 0)
+                SetDefaultRelativePositions();
+        }
+
+        private void SetDefaultRelativePositions()
+        {
+            // Default positions based on XAML layout (image at 50,20, size 400x230)
+            var defaults = new Dictionary<string, double>
+            {
+                ["L2_X"] = 0.170, ["L2_Y"] = -0.030,
+                ["R2_X"] = 0.655, ["R2_Y"] = -0.030,
+                ["L1_X"] = 0.170, ["L1_Y"] = 0.087,
+                ["R1_X"] = 0.655, ["R1_Y"] = 0.087,
+                ["DPAD_UP_X"] = 0.175, ["DPAD_UP_Y"] = 0.370,
+                ["DPAD_LEFT_X"] = 0.125, ["DPAD_LEFT_Y"] = 0.465,
+                ["DPAD_RIGHT_X"] = 0.235, ["DPAD_RIGHT_Y"] = 0.465,
+                ["DPAD_DOWN_X"] = 0.175, ["DPAD_DOWN_Y"] = 0.561,
+                ["SELECT_X"] = 0.370, ["SELECT_Y"] = 0.435,
+                ["START_X"] = 0.563, ["START_Y"] = 0.435,
+                ["L3_X"] = 0.488, ["L3_Y"] = 0.565,
+                ["R3_X"] = 0.838, ["R3_Y"] = 0.565,
+                ["Y_X"] = 0.865, ["Y_Y"] = 0.370,
+                ["X_X"] = 0.795, ["X_Y"] = 0.465,
+                ["B_X"] = 0.930, ["B_Y"] = 0.465,
+                ["A_X"] = 0.865, ["A_Y"] = 0.561,
+            };
+            foreach (var kvp in defaults)
+                _settings.RelativeButtonPositions[kvp.Key] = kvp.Value;
         }
 
         private void SaveSettings()
