@@ -1283,6 +1283,8 @@ namespace TenzoraX
 
         private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
+            SaveSettings();
+
             if (!_isExplicitClose)
             {
                 if (_settings.MinimizeToTray)
