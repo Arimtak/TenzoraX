@@ -167,14 +167,9 @@ namespace TenzoraX
 
         private void LoadControllerBackground()
         {
-            string defaultImgPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "icons", "xbox-360.png");
             if (!string.IsNullOrEmpty(_settings.ControllerImagePath) && File.Exists(_settings.ControllerImagePath))
             {
                 try { ImgController.Source = new BitmapImage(new Uri(_settings.ControllerImagePath)); } catch { }
-            }
-            if (ImgController.Source == null && File.Exists(defaultImgPath))
-            {
-                try { ImgController.Source = new BitmapImage(new Uri(defaultImgPath)); } catch { }
             }
             if (ImgController.Source == null)
             {
@@ -1277,23 +1272,9 @@ namespace TenzoraX
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Failed to load icon from resources: {ex.Message}");
-            }
+            catch { }
 
-            // Fallback: Load gamepad icon from file
-            string icoPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "icons", "app.ico");
-            if (System.IO.File.Exists(icoPath))
-            {
-                try
-                {
-                    return new System.Drawing.Icon(icoPath);
-                }
-                catch { }
-            }
-
-            // Final fallback: draw a simple placeholder icon
+            // Fallback: draw a simple placeholder icon
             var bmp = new System.Drawing.Bitmap(32, 32);
             using (var g = System.Drawing.Graphics.FromImage(bmp))
             {
@@ -1306,16 +1287,20 @@ namespace TenzoraX
 
         private ImageSource CreateControllerIconSource()
         {
-            string icoPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "icons", "app.ico");
-            if (System.IO.File.Exists(icoPath))
+            try
             {
-                try
+                var uri = new Uri("pack://application:,,,/assets/icons/app.ico", UriKind.RelativeOrAbsolute);
+                var streamInfo = System.Windows.Application.GetResourceStream(uri);
+                if (streamInfo != null)
                 {
-                    var icon = new System.Drawing.Icon(icoPath);
-                    return Imaging.CreateBitmapSourceFromHIcon(icon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                    using (var stream = streamInfo.Stream)
+                    {
+                        var icon = new System.Drawing.Icon(stream);
+                        return Imaging.CreateBitmapSourceFromHIcon(icon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                    }
                 }
-                catch { }
             }
+            catch { }
             // Fallback: draw a simple placeholder
             var bmp = new System.Drawing.Bitmap(32, 32);
             using (var g = System.Drawing.Graphics.FromImage(bmp))

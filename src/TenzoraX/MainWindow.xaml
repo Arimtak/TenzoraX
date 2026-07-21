@@ -119,7 +119,7 @@
                     <Border Grid.Row="1" Background="Transparent" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
                         <Canvas x:Name="CanvasGamepad" ClipToBounds="True" Background="Transparent" MouseDown="CanvasGamepad_MouseDown" KeyDown="CanvasGamepad_KeyDown" Focusable="True">
                             <!-- Controller Background Image -->
-                            <Image x:Name="ImgController" Source="assets/icons/xbox-360.png" Stretch="Uniform"/>
+                            <Image x:Name="ImgController" Source="pack://application:,,,/assets/icons/xbox-360.png" Stretch="Uniform"/>
                             
                             <!-- L2 & R2 (Triggers - oben) - gleiche Größe wie L1/R1 -->
                             <Button x:Name="Btn_L2" Content="L2" Style="{StaticResource CircularBtnStyle}" Width="65" Height="24" Canvas.Left="118" Canvas.Top="13" Click="GamepadButton_Click" FontSize="10"/>
