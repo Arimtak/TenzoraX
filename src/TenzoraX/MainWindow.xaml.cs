@@ -158,6 +158,12 @@ namespace TenzoraX
             ChkStartMinimized.IsChecked = _settings.StartMinimized;
             ChkMinimizeToTray.IsChecked = _settings.MinimizeToTray;
 
+            // Final position reapply after all initialization and layout
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                ReapplyButtonPositions();
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
+
             var args = Environment.GetCommandLineArgs();
             if (_settings.StartMinimized || args.Contains("--minimized"))
             {
@@ -318,7 +324,12 @@ namespace TenzoraX
                 imgW = ImgController.Width;
                 imgH = ImgController.Height;
             }
-            if (double.IsNaN(imgW) || double.IsNaN(imgH) || imgW <= 0 || imgH <= 0) return;
+            if (double.IsNaN(imgW) || double.IsNaN(imgH) || imgW <= 0 || imgH <= 0)
+            {
+                imgW = 400 * _settings.ControllerScale;
+                imgH = 230 * _settings.ControllerScale;
+            }
+            if (imgW <= 0 || imgH <= 0) return;
 
             foreach (var pair in _gamepadButtonsUi)
             {
