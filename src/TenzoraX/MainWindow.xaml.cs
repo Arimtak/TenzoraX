@@ -313,7 +313,12 @@ namespace TenzoraX
             if (double.IsNaN(imgTop)) imgTop = 20;
             double imgW = ImgController.ActualWidth;
             double imgH = ImgController.ActualHeight;
-            if (imgW <= 0 || imgH <= 0) return;
+            if (imgW <= 0 || imgH <= 0)
+            {
+                imgW = ImgController.Width;
+                imgH = ImgController.Height;
+            }
+            if (double.IsNaN(imgW) || double.IsNaN(imgH) || imgW <= 0 || imgH <= 0) return;
 
             foreach (var pair in _gamepadButtonsUi)
             {
