@@ -77,6 +77,7 @@ namespace TenzoraX
 
         private NotifyIcon? _notifyIcon;
         private bool _isExplicitClose = false;
+        private bool _isFreshStart = false;
         private AppSettings _settings = new();
         private LanguageManager Lang => LanguageManager.Instance;
         private string ConfigFilePath => Path.Combine(GetDocumentsPath(), ConfigFileName);
@@ -185,6 +186,13 @@ namespace TenzoraX
             double scale = _settings.ControllerScale;
             ImgController.Width = 400 * scale;
             ImgController.Height = 230 * scale;
+
+            if (_isFreshStart)
+            {
+                _settings.ControllerLeft = Math.Max(0, (CanvasGamepad.ActualWidth - ImgController.Width) / 2);
+                _settings.ControllerTop = Math.Max(0, (CanvasGamepad.ActualHeight - ImgController.Height) / 2);
+                _isFreshStart = false;
+            }
             Canvas.SetLeft(ImgController, _settings.ControllerLeft);
             Canvas.SetTop(ImgController, _settings.ControllerTop);
 
@@ -936,6 +944,7 @@ namespace TenzoraX
             else
             {
                 _settings = new AppSettings();
+                _isFreshStart = true;
                 SaveSettings();
             }
 
@@ -1177,11 +1186,9 @@ namespace TenzoraX
             {
                 _settings.ControllerImagePath = "";
                 _settings.ControllerScale = 1.0;
-                _settings.ControllerLeft = 50.0;
-                _settings.ControllerTop = 20.0;
-                SaveSettings();
+                _isFreshStart = true;
                 LoadControllerBackground();
-                ReapplyButtonPositions();
+                SaveSettings();
             }
         }
 
