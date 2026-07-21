@@ -929,33 +929,45 @@ namespace TenzoraX
             }
 
             if (_settings.RelativeButtonPositions.Count == 0)
+            {
                 SetDefaultRelativePositions();
+                SaveSettings();
+            }
         }
 
         private void SetDefaultRelativePositions()
         {
-            // Default positions based on XAML layout (image at 50,20, size 400x230)
+            // Default positions matching the reference controller image (image at 50,20, size 400x230)
             var defaults = new Dictionary<string, double>
             {
-                ["L2_X"] = 0.170, ["L2_Y"] = -0.030,
-                ["R2_X"] = 0.655, ["R2_Y"] = -0.030,
-                ["L1_X"] = 0.170, ["L1_Y"] = 0.087,
-                ["R1_X"] = 0.655, ["R1_Y"] = 0.087,
-                ["DPAD_UP_X"] = 0.175, ["DPAD_UP_Y"] = 0.370,
-                ["DPAD_LEFT_X"] = 0.125, ["DPAD_LEFT_Y"] = 0.465,
-                ["DPAD_RIGHT_X"] = 0.235, ["DPAD_RIGHT_Y"] = 0.465,
-                ["DPAD_DOWN_X"] = 0.175, ["DPAD_DOWN_Y"] = 0.561,
-                ["SELECT_X"] = 0.370, ["SELECT_Y"] = 0.435,
-                ["START_X"] = 0.563, ["START_Y"] = 0.435,
-                ["L3_X"] = 0.488, ["L3_Y"] = 0.565,
-                ["R3_X"] = 0.838, ["R3_Y"] = 0.565,
-                ["Y_X"] = 0.865, ["Y_Y"] = 0.370,
-                ["X_X"] = 0.795, ["X_Y"] = 0.465,
-                ["B_X"] = 0.930, ["B_Y"] = 0.465,
-                ["A_X"] = 0.865, ["A_Y"] = 0.561,
+                ["L2_X"] = 0.209, ["L2_Y"] = -0.151,
+                ["R2_X"] = 0.799, ["R2_Y"] = -0.151,
+                ["L1_X"] = 0.215, ["L1_Y"] = -0.058,
+                ["R1_X"] = 0.797, ["R1_Y"] = -0.052,
+                ["DPAD_UP_X"] = 0.422, ["DPAD_UP_Y"] = 0.381,
+                ["DPAD_LEFT_X"] = 0.359, ["DPAD_LEFT_Y"] = 0.454,
+                ["DPAD_RIGHT_X"] = 0.476, ["DPAD_RIGHT_Y"] = 0.468,
+                ["DPAD_DOWN_X"] = 0.409, ["DPAD_DOWN_Y"] = 0.567,
+                ["SELECT_X"] = 0.446, ["SELECT_Y"] = 0.212,
+                ["START_X"] = 0.591, ["START_Y"] = 0.212,
+                ["L3_X"] = 0.240, ["L3_Y"] = 0.156,
+                ["R3_X"] = 0.678, ["R3_Y"] = 0.410,
+                ["Y_X"] = 0.871, ["Y_Y"] = 0.100,
+                ["X_X"] = 0.787, ["X_Y"] = 0.201,
+                ["B_X"] = 0.947, ["B_Y"] = 0.228,
+                ["A_X"] = 0.865, ["A_Y"] = 0.341,
             };
             foreach (var kvp in defaults)
                 _settings.RelativeButtonPositions[kvp.Key] = kvp.Value;
+        }
+
+        public void ResetPositionsToDefaults()
+        {
+            _settings.RelativeButtonPositions.Clear();
+            _settings.ButtonPositions.Clear();
+            SetDefaultRelativePositions();
+            SaveSettings();
+            ReapplyButtonPositions();
         }
 
         private void SaveSettings()
@@ -1039,6 +1051,11 @@ namespace TenzoraX
                 CanvasGamepad.Focus();
             UpdateButtonsAppearance();
             SaveSettings();
+        }
+
+        private void BtnResetPositions_Click(object sender, RoutedEventArgs e)
+        {
+            ResetPositionsToDefaults();
         }
 
         private void SelectButton(System.Windows.Controls.Button btn)

@@ -421,6 +421,7 @@
                     <StackPanel x:Name="PanelEditModes" Visibility="Collapsed" Margin="20,2,0,6">
                         <RadioButton x:Name="RadioEditImage" Content="{Binding Edit_ImageMode}" GroupName="EditModeType" Checked="RadioEditMode_Checked" FontSize="10" Margin="0,0,0,2" Foreground="White"/>
                         <RadioButton x:Name="RadioEditButtons" Content="{Binding Edit_ButtonsMode}" GroupName="EditModeType" Checked="RadioEditMode_Checked" FontSize="10" Margin="0,0,0,4" Foreground="White"/>
+                        <Button x:Name="BtnResetPositions" Content="{Binding Edit_ResetPositions}" Click="BtnResetPositions_Click" Height="22" Padding="8,1" Margin="0,0,0,0" Foreground="#EF4444" FontSize="10"/>
                     </StackPanel>
                     <StackPanel x:Name="PanelControllerImageEdit" Visibility="Collapsed" Margin="20,2,0,6">
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">

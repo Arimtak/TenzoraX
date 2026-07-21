@@ -79,6 +79,7 @@ namespace TenzoraX
         public string Edit_Autostart => this["Edit_Autostart"];
         public string Edit_StartMinimized => this["Edit_StartMinimized"];
         public string Edit_MinimizeToTray => this["Edit_MinimizeToTray"];
+        public string Edit_ResetPositions => this["Edit_ResetPositions"];
 
         public string Tray_Open => this["Tray_Open"];
         public string Tray_SwitchProfile => this["Tray_SwitchProfile"];
@@ -148,6 +149,7 @@ namespace TenzoraX
                 ["Edit_Autostart"] = "Start with Windows",
                 ["Edit_StartMinimized"] = "Start minimized",
                 ["Edit_MinimizeToTray"] = "Minimize (not close)",
+                ["Edit_ResetPositions"] = "Reset button positions",
 
                 ["Tray_Open"] = "Open TenzoraX",
                 ["Tray_SwitchProfile"] = "Switch profile",
@@ -234,6 +236,7 @@ namespace TenzoraX
                 ["Edit_Autostart"] = "Mit Windows starten",
                 ["Edit_StartMinimized"] = "Minimiert starten",
                 ["Edit_MinimizeToTray"] = "Minimieren (nicht schließen)",
+                ["Edit_ResetPositions"] = "Tastenpositionen zurücksetzen",
 
                 ["Tray_Open"] = "TenzoraX öffnen",
                 ["Tray_SwitchProfile"] = "Profil wechseln",
