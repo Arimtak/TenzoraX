@@ -25,6 +25,8 @@ namespace TenzoraX
                 ? val
                 : _data.GetValueOrDefault("en", new())?.GetValueOrDefault(key, key) ?? key;
 
+        public bool HasLanguage(string lang) => _data.ContainsKey(lang);
+
         public void Switch(string lang)
         {
             if (_data.ContainsKey(lang) && _currentLang != lang)
@@ -68,6 +70,8 @@ namespace TenzoraX
         public string Mapping_ActionPlaceholder => this["Mapping_ActionPlaceholder"];
         public string Mapping_Save => this["Mapping_Save"];
         public string Mapping_ListTitle => this["Mapping_ListTitle"];
+        public string Mapping_Record => this["Mapping_Record"];
+        public string Mapping_StopRecord => this["Mapping_StopRecord"];
 
         public string Edit_ModeEnabled => this["Edit_ModeEnabled"];
         public string Edit_ImageMode => this["Edit_ImageMode"];
@@ -80,6 +84,18 @@ namespace TenzoraX
         public string Edit_StartMinimized => this["Edit_StartMinimized"];
         public string Edit_MinimizeToTray => this["Edit_MinimizeToTray"];
         public string Edit_ResetPositions => this["Edit_ResetPositions"];
+        public string Edit_AdminMode => this["Edit_AdminMode"];
+        public string Edit_AdminUser => this["Edit_AdminUser"];
+        public string Edit_AdminElevated => this["Edit_AdminElevated"];
+
+        public string Battery_Title => this["Battery_Title"];
+        public string Battery_Enable => this["Battery_Enable"];
+        public string Battery_HoursLabel => this["Battery_HoursLabel"];
+        public string Battery_HoursUnit => this["Battery_HoursUnit"];
+        public string Battery_TrayEnable => this["Battery_TrayEnable"];
+        public string Battery_Animation => this["Battery_Animation"];
+        public string Battery_Reset => this["Battery_Reset"];
+        public string Battery_Calculated => this["Battery_Calculated"];
 
         public string Tray_Open => this["Tray_Open"];
         public string Tray_SwitchProfile => this["Tray_SwitchProfile"];
@@ -98,9 +114,20 @@ namespace TenzoraX
         public string Dialog_AutostartErrorMsg => this["Dialog_AutostartErrorMsg"];
         public string Dialog_ResetImageTitle => this["Dialog_ResetImageTitle"];
         public string Dialog_ResetImageMsg => this["Dialog_ResetImageMsg"];
+        public string Dialog_RestartAsAdminTitle => this["Dialog_RestartAsAdminTitle"];
+        public string Dialog_RestartAsAdminMsg => this["Dialog_RestartAsAdminMsg"];
 
         public string ImageFilter => this["ImageFilter"];
         public string ImagePickerTitle => this["ImagePickerTitle"];
+
+        public string Btn_TestOutput => this["Btn_TestOutput"];
+
+        public string Sound_Enable => this["Sound_Enable"];
+        public string Sound_VolumeLabel => this["Sound_VolumeLabel"];
+
+        public string OutputMode_Label => this["OutputMode_Label"];
+        public string OutputMode_VK => this["OutputMode_VK"];
+        public string OutputMode_ScanCode => this["OutputMode_ScanCode"];
 
         #endregion
 
@@ -138,6 +165,8 @@ namespace TenzoraX
                 ["Mapping_ActionPlaceholder"] = "(empty) e.g. F13",
                 ["Mapping_Save"] = "Save combination",
                 ["Mapping_ListTitle"] = "Saved Combinations",
+                ["Mapping_Record"] = "Record",
+                ["Mapping_StopRecord"] = "Stop",
 
                 ["Edit_ModeEnabled"] = "Edit mode",
                 ["Edit_ImageMode"] = "Image (move/scale)",
@@ -150,6 +179,18 @@ namespace TenzoraX
                 ["Edit_StartMinimized"] = "Start minimized",
                 ["Edit_MinimizeToTray"] = "Minimize (not close)",
                 ["Edit_ResetPositions"] = "Reset button positions",
+                ["Edit_AdminMode"] = "Run as administrator",
+                ["Edit_AdminUser"] = "● User",
+                ["Edit_AdminElevated"] = "● Administrator",
+
+                ["Battery_Title"] = "Battery",
+                ["Battery_Enable"] = "Battery system",
+                ["Battery_HoursLabel"] = "Estimated battery life",
+                ["Battery_HoursUnit"] = "Hours",
+                ["Battery_TrayEnable"] = "Battery in tray",
+                ["Battery_Animation"] = "Animation",
+                ["Battery_Reset"] = "Reset battery to 100%",
+                ["Battery_Calculated"] = "Calculated: {0} min ({1:F1}%/min)",
 
                 ["Tray_Open"] = "Open TenzoraX",
                 ["Tray_SwitchProfile"] = "Switch profile",
@@ -168,6 +209,8 @@ namespace TenzoraX
                 ["Dialog_AutostartErrorMsg"] = "Could not configure autostart: {0}",
                 ["Dialog_ResetImageTitle"] = "Reset image",
                 ["Dialog_ResetImageMsg"] = "Are you sure you want to reset the controller image and its position/size?",
+                ["Dialog_RestartAsAdminTitle"] = "Restart as administrator",
+                ["Dialog_RestartAsAdminMsg"] = "TenzoraX must be restarted as administrator for this feature. Do you want to restart now?",
 
                 ["ImageFilter"] = "Image files (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp|All files (*.*)|*.*",
                 ["ImagePickerTitle"] = "Select controller image",
@@ -191,6 +234,12 @@ namespace TenzoraX
                 ["Btn_NumPlus"] = "Num +",
                 ["Btn_NumDot"] = "Num .",
                 ["Btn_Num0"] = "Num 0",
+                ["Btn_TestOutput"] = "Test output",
+                ["Sound_Enable"] = "Sound feedback on output",
+                ["Sound_VolumeLabel"] = "Volume:",
+                ["OutputMode_Label"] = "Output mode:",
+                ["OutputMode_VK"] = "Normal (VK)",
+                ["OutputMode_ScanCode"] = "Compatibility (Scan code)",
             };
 
             var de = new Dictionary<string, string>
@@ -225,6 +274,8 @@ namespace TenzoraX
                 ["Mapping_ActionPlaceholder"] = "(leer) z.B. F13",
                 ["Mapping_Save"] = "Kombination speichern",
                 ["Mapping_ListTitle"] = "Gespeicherte Kombinationen",
+                ["Mapping_Record"] = "Aufnehmen",
+                ["Mapping_StopRecord"] = "Stop",
 
                 ["Edit_ModeEnabled"] = "Bearbeitungsmodus",
                 ["Edit_ImageMode"] = "Bild (verschieben/skalieren)",
@@ -237,6 +288,18 @@ namespace TenzoraX
                 ["Edit_StartMinimized"] = "Minimiert starten",
                 ["Edit_MinimizeToTray"] = "Minimieren (nicht schließen)",
                 ["Edit_ResetPositions"] = "Tastenpositionen zurücksetzen",
+                ["Edit_AdminMode"] = "Als Administrator ausführen",
+                ["Edit_AdminUser"] = "● Benutzer",
+                ["Edit_AdminElevated"] = "● Administrator",
+
+                ["Battery_Title"] = "Batterie",
+                ["Battery_Enable"] = "Batterie-System",
+                ["Battery_HoursLabel"] = "Geschätzte Akkulaufzeit",
+                ["Battery_HoursUnit"] = "Stunden",
+                ["Battery_TrayEnable"] = "Batterie im Tray",
+                ["Battery_Animation"] = "Animation",
+                ["Battery_Reset"] = "Batterie auf 100% zurücksetzen",
+                ["Battery_Calculated"] = "Berechnet: {0} Min ({1:F1}%/Min)",
 
                 ["Tray_Open"] = "TenzoraX öffnen",
                 ["Tray_SwitchProfile"] = "Profil wechseln",
@@ -255,6 +318,8 @@ namespace TenzoraX
                 ["Dialog_AutostartErrorMsg"] = "Autostart konnte nicht konfiguriert werden: {0}",
                 ["Dialog_ResetImageTitle"] = "Bild zurücksetzen",
                 ["Dialog_ResetImageMsg"] = "Möchten Sie das Controller-Bild und seine Position/Größe wirklich zurücksetzen?",
+                ["Dialog_RestartAsAdminTitle"] = "Als Administrator neu starten",
+                ["Dialog_RestartAsAdminMsg"] = "TenzoraX muss als Administrator neu gestartet werden. Jetzt neu starten?",
 
                 ["ImageFilter"] = "Bilddateien (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp|Alle Dateien (*.*)|*.*",
                 ["ImagePickerTitle"] = "Controller-Bild auswählen",
@@ -278,6 +343,12 @@ namespace TenzoraX
                 ["Btn_NumPlus"] = "Num +",
                 ["Btn_NumDot"] = "Num .",
                 ["Btn_Num0"] = "Num 0",
+                ["Btn_TestOutput"] = "Testausgabe",
+                ["Sound_Enable"] = "Sound-Feedback bei Ausgabe",
+                ["Sound_VolumeLabel"] = "Lautstärke:",
+                ["OutputMode_Label"] = "Ausgabemodus:",
+                ["OutputMode_VK"] = "Normal (VK)",
+                ["OutputMode_ScanCode"] = "Kompatibilität (Scan code)",
             };
 
             _data["en"] = en;

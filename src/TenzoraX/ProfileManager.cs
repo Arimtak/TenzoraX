@@ -156,7 +156,11 @@ namespace TenzoraX
                     {
                         _triggeredMappings.Add(mapping);
                         // Trigger key down in background thread
-                        Task.Run(() => InputSimulator.SimulateKeyDown(mapping.Action));
+                        Task.Run(() =>
+                        {
+                            InputSimulator.SimulateKeyDown(mapping.Action);
+                            SoundManager.PlayConfirmation();
+                        });
                     }
                 }
                 else

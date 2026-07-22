@@ -276,9 +276,9 @@
                                 <Button Content="CTRL" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click"/>
                                 <Button Content="ALT" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click"/>
                                 <Button Content="SPACE" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click"/>
-                                <Button Content="{Binding Btn_MouseL}" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
-                                <Button Content="{Binding Btn_MouseR}" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
-                                <Button Content="{Binding Btn_MouseM}" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
+                                <Button Content="{Binding Btn_MouseL}" Tag="MOUSE_LEFT" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
+                                <Button Content="{Binding Btn_MouseR}" Tag="MOUSE_RIGHT" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
+                                <Button Content="{Binding Btn_MouseM}" Tag="MOUSE_MIDDLE" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
                             </UniformGrid>
 
                             <TextBlock Text="{Binding KB_NumPad}" Style="{StaticResource SectionLabelStyle}"/>
@@ -351,10 +351,7 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="{Binding Mapping_Title}" FontWeight="Bold" FontSize="12" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                <RadioButton x:Name="RbCaptureOn" Content="{Binding Mapping_On}" Foreground="#10B981" FontWeight="Bold" Margin="0,0,8,0" VerticalAlignment="Center" Checked="RbCaptureOn_Checked"/>
-                                <RadioButton x:Name="RbCaptureOff" Content="{Binding Mapping_Off}" Foreground="#EF4444" FontWeight="Bold" VerticalAlignment="Center" Checked="RbCaptureOff_Checked"/>
-                            </StackPanel>
+                            <Button x:Name="BtnRecord" Content="{Binding Mapping_Record}" Click="BtnRecord_Click" Height="24" Padding="8,0" Margin="0,0,0,0" FontSize="10" FontWeight="Bold" Foreground="#10B981" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"/>
                         </Grid>
                         
                         <TextBlock Text="{Binding Mapping_ControllerLabel}" FontSize="10" Foreground="{StaticResource MutedTextBrush}"/>
@@ -381,7 +378,23 @@
                             <Button Content="✕" Click="BtnClearAction_Click" Grid.Column="1" Margin="6,0,0,0" Height="24" Width="24" Padding="0" FontSize="10"/>
                         </Grid>
 
-                        <Button Content="{Binding Mapping_Save}" Click="BtnSaveMapping_Click" FontWeight="Bold" Height="30" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" FontSize="11"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Content="{Binding Mapping_Save}" Click="BtnSaveMapping_Click" FontWeight="Bold" Height="30" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" FontSize="11"/>
+                            <Button Grid.Column="1" Content="{Binding Btn_TestOutput}" Click="BtnTestOutput_Click" Height="30" Padding="8,0" Margin="6,0,0,0" FontSize="10" Foreground="#F59E0B" Background="#1E1E28" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
+                        </Grid>
+
+                        <Grid Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding OutputMode_Label}" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <ComboBox x:Name="ComboOutputMode" Grid.Column="1" SelectionChanged="ComboOutputMode_SelectionChanged" Height="24" FontSize="10"/>
+                        </Grid>
                     </StackPanel>
                 </Border>
 
@@ -415,7 +428,8 @@
                     </Border>
                 </Grid>
 
-                <StackPanel Grid.Row="3" Margin="0,2,0,0">
+                <ScrollViewer Grid.Row="3" MaxHeight="220" VerticalScrollBarVisibility="Auto" Margin="0,2,0,0">
+                <StackPanel>
                     <Separator Background="{StaticResource BorderBrush}" Margin="0,0,0,6"/>
                     <CheckBox x:Name="ChkEditMode" Content="{Binding Edit_ModeEnabled}" Checked="ChkEditMode_Checked" Unchecked="ChkEditMode_Checked" FontWeight="SemiBold" Margin="0,0,0,4" Foreground="White"/>
                     <StackPanel x:Name="PanelEditModes" Visibility="Collapsed" Margin="20,2,0,6">
@@ -434,16 +448,78 @@
                     <CheckBox x:Name="ChkAutostart" Content="{Binding Edit_Autostart}" Checked="ChkAutostart_Changed" Unchecked="ChkAutostart_Changed" Margin="0,0,0,2"/>
                     <CheckBox x:Name="ChkStartMinimized" Content="{Binding Edit_StartMinimized}" Checked="ChkStartMinimized_Changed" Unchecked="ChkStartMinimized_Changed" Margin="0,0,0,0"/>
                     <CheckBox x:Name="ChkMinimizeToTray" Content="{Binding Edit_MinimizeToTray}" Checked="ChkMinimizeToTray_Changed" Unchecked="ChkMinimizeToTray_Changed" Margin="0,0,0,0"/>
-                    <Separator Background="{StaticResource BorderBrush}" Margin="0,6,0,4"/>
-                        <Grid Margin="0,0,0,0">
+
+                    <Separator Background="{StaticResource BorderBrush}" Margin="0,6,0,2"/>
+
+                    <Grid Margin="0,0,0,2">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="🌐" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="14"/>
-                        <ComboBox x:Name="ComboLanguage" Grid.Column="1" SelectionChanged="ComboLanguage_SelectionChanged" Height="26"/>
+                        <CheckBox x:Name="ChkAdminMode" Content="{Binding Edit_AdminMode}" Click="ChkAdminMode_Click" Margin="0,0,0,0"/>
+                        <TextBlock x:Name="TxtAdminStatus" Text="" Grid.Column="1" FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center" Margin="6,0,0,0"/>
                     </Grid>
+
+                    <Separator Background="{StaticResource BorderBrush}" Margin="0,6,0,4"/>
+
+                    <!-- Sound Feedback -->
+                    <Border Background="#0D0D12" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="10" Margin="0,0,0,6">
+                        <StackPanel>
+                            <CheckBox x:Name="ChkSound" Content="{Binding Sound_Enable}" Checked="ChkSound_Changed" Unchecked="ChkSound_Changed" FontWeight="SemiBold" Margin="0,0,0,2" Foreground="White"/>
+                            <Grid Margin="16,0,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding Sound_VolumeLabel}" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <Slider x:Name="SliderSoundVolume" Grid.Column="1" Minimum="0" Maximum="100" Value="50" TickFrequency="10" TickPlacement="None" ValueChanged="SliderSoundVolume_ValueChanged" Height="20"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Battery Settings -->
+                    <Border Background="#0D0D12" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="10" Margin="0,0,0,0">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding Battery_Title}" FontWeight="Bold" FontSize="12" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
+                                <Button x:Name="BtnToggleBattery" Content="▼" Click="BtnToggleBattery_Click" Width="20" Height="20" Padding="0" FontSize="9" Background="Transparent" BorderThickness="0" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Grid.Column="1" Cursor="Hand"/>
+                            </Grid>
+
+                            <TextBlock x:Name="TxtBatterySummary" FontSize="10" Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,4" Visibility="Collapsed"/>
+
+                            <CheckBox x:Name="ChkBatteryEnable" Content="{Binding Battery_Enable}" Checked="ChkBatteryEnable_Changed" Unchecked="ChkBatteryEnable_Changed" FontWeight="SemiBold" Margin="0,0,0,4" Foreground="White"/>
+
+                            <StackPanel x:Name="PanelBatterySettings" Margin="16,2,0,6">
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Battery_HoursLabel}" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="3" Width="52" Height="24" Padding="0">
+                                            <TextBox x:Name="TxtBatteryHours" Text="15" FontSize="12" TextAlignment="Center" VerticalContentAlignment="Center" Padding="0" BorderThickness="0" Background="Transparent" Foreground="White" LostFocus="TxtBatteryHours_LostFocus" KeyDown="TxtBatteryHours_KeyDown"/>
+                                        </Border>
+                                        <TextBlock Text="{Binding Battery_HoursUnit}" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="5,0,0,0"/>
+                                        <Button x:Name="BtnConfirmBattery" Content="✓" Click="BtnConfirmBattery_Click" Width="22" Height="22" Padding="0" FontSize="10" FontWeight="Bold" Margin="6,0,0,0" Foreground="#10B981" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <TextBlock x:Name="TxtBatteryCalculated" Text="{Binding Battery_Calculated}" FontSize="9" Foreground="{StaticResource MutedTextBrush}" Margin="0,0,0,4"/>
+
+                                <CheckBox x:Name="ChkBatteryTray" Content="{Binding Battery_TrayEnable}" Checked="ChkBatteryTray_Changed" Unchecked="ChkBatteryTray_Changed" FontSize="10" Margin="0,0,0,2" Foreground="White"/>
+                                <CheckBox x:Name="ChkBatteryAnimation" Content="{Binding Battery_Animation}" Checked="ChkBatteryAnimation_Changed" Unchecked="ChkBatteryAnimation_Changed" FontSize="10" Margin="0,0,0,4" Foreground="White"/>
+
+                                <Button x:Name="BtnResetBattery" Content="{Binding Battery_Reset}" Click="BtnResetBattery_Click" Height="22" Padding="8,1" FontSize="10" Foreground="#F59E0B"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
+                </ScrollViewer>
             </Grid>
         </Border>
     </Grid>

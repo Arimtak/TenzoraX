@@ -10,11 +10,14 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+using Path = System.IO.Path;
 
 namespace TenzoraX
 {
@@ -67,6 +70,18 @@ namespace TenzoraX
         public double ControllerTop { get; set; } = 20;
         public bool CaptureEnabled { get; set; } = true;
         public string Language { get; set; } = "";
+
+        public bool BatteryEnabled { get; set; } = false;
+        public double BatteryHours { get; set; } = 15;
+        public double BatteryActiveMinutes { get; set; } = 0;
+        public bool BatteryTrayEnabled { get; set; } = true;
+        public bool BatteryAnimationEnabled { get; set; } = true;
+        public bool BatterySettingsCollapsed { get; set; } = false;
+        public string OutputMode { get; set; } = "VK";
+        public bool SoundEnabled { get; set; } = true;
+        public double SoundVolume { get; set; } = 0.5;
+        public bool RunAsAdministrator { get; set; } = false;
+        public bool HasCustomPosition { get; set; } = false;
     }
 
     public partial class MainWindow : Window
@@ -77,14 +92,12 @@ namespace TenzoraX
 
         private NotifyIcon? _notifyIcon;
         private bool _isExplicitClose = false;
-        private bool _isFreshStart = false;
         private AppSettings _settings = new();
         private LanguageManager Lang => LanguageManager.Instance;
         private string ConfigFilePath => Path.Combine(GetDocumentsPath(), ConfigFileName);
         private const string ConfigFileName = "config.json";
 
-        private readonly List<string> _tempCombo = new();
-        private readonly List<string> _tempAction = new();
+        private readonly InputCaptureEngine _capture = new();
         private readonly Dictionary<string, System.Windows.Controls.Button> _gamepadButtonsUi = new();
         private readonly HashSet<string> _physicallyHeldButtons = new();
 
@@ -104,11 +117,33 @@ namespace TenzoraX
         private System.Windows.Point _dragStartPointImg = new();
         private double _originalLeftImg = 0, _originalTopImg = 0;
 
+        // Battery tracking
+        private System.Windows.Threading.DispatcherTimer? _batteryTimer;
+        private DateTime _lastBatteryInputTime = DateTime.MinValue;
+        private bool _batteryWasActiveLastTick = false;
+        private const double BatteryActiveTimeoutSeconds = 5;
+        private int _batteryLastIconPercent = -1;
+        private bool _batterySettingsCollapsed
+        {
+            get => _settings.BatterySettingsCollapsed;
+            set => _settings.BatterySettingsCollapsed = value;
+        }
+
         public MainWindow()
         {
             InitializeComponent();
             Loaded += MainWindow_Loaded;
             Closing += MainWindow_Closing;
+            AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+            {
+                if (e.ExceptionObject is Exception ex)
+                    LogCrash("Unhandled", ex);
+            };
+            Dispatcher.UnhandledException += (s, e) =>
+            {
+                LogCrash("Dispatcher", e.Exception);
+                e.Handled = true;
+            };
         }
 
         private string GetDocumentsPath()
@@ -128,6 +163,29 @@ namespace TenzoraX
             Icon = CreateControllerIconSource();
             InitializeGamepadButtonMap();
             LoadSettings();
+
+            // Auto-elevate if setting is enabled (silent – no dialog)
+            if (_settings.RunAsAdministrator && !InputSimulator.IsRunningAsAdmin())
+            {
+                try
+                {
+                    var cmdArgs = Environment.GetCommandLineArgs();
+                    var argStr = cmdArgs.Length > 1
+                        ? string.Join(" ", cmdArgs.Skip(1).Select(a => a.Contains(' ') ? $"\"{a}\"" : a))
+                        : "";
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = Environment.ProcessPath,
+                        UseShellExecute = true,
+                        Verb = "runas",
+                        Arguments = argStr
+                    };
+                    Process.Start(psi);
+                }
+                catch { }
+                Environment.Exit(0);
+            }
+
             InitLanguage();
             DataContext = LanguageManager.Instance;
             LoadButtonPositions();
@@ -152,18 +210,54 @@ namespace TenzoraX
                 else
                     RadioEditImage.IsChecked = true;
             }
-            RbCaptureOn.IsChecked = _settings.CaptureEnabled;
-            RbCaptureOff.IsChecked = !_settings.CaptureEnabled;
             ChkPause.IsChecked = _settings.IsPaused;
             ChkAutostart.IsChecked = _settings.AutostartEnabled;
             ChkStartMinimized.IsChecked = _settings.StartMinimized;
             ChkMinimizeToTray.IsChecked = _settings.MinimizeToTray;
 
-            // Final position reapply after all initialization and layout
+            // Output mode
+            ComboOutputMode.Items.Add(Lang.OutputMode_VK);
+            ComboOutputMode.Items.Add(Lang.OutputMode_ScanCode);
+            ComboOutputMode.SelectedIndex = _settings.OutputMode == "ScanCode" ? 1 : 0;
+            ApplyOutputMode();
+
+            // Admin mode
+            UpdateAdminUI();
+
+            // Sound feedback
+            ChkSound.IsChecked = _settings.SoundEnabled;
+            SoundManager.Enabled = _settings.SoundEnabled;
+            SliderSoundVolume.Value = _settings.SoundVolume * 100;
+            SoundManager.Volume = _settings.SoundVolume;
+
+            // Battery UI initialization
+            ChkBatteryEnable.IsChecked = _settings.BatteryEnabled;
+            PanelBatterySettings.Visibility = _settings.BatteryEnabled && !_batterySettingsCollapsed ? Visibility.Visible : Visibility.Collapsed;
+            BtnToggleBattery.Content = _batterySettingsCollapsed ? "▼" : "▲";
+            TxtBatterySummary.Visibility = _settings.BatteryEnabled && _batterySettingsCollapsed ? Visibility.Visible : Visibility.Collapsed;
+            TxtBatteryHours.Text = _settings.BatteryHours.ToString("0.#");
+            UpdateBatteryCalculatedLabel();
+            ChkBatteryTray.IsChecked = _settings.BatteryTrayEnabled;
+            ChkBatteryAnimation.IsChecked = _settings.BatteryAnimationEnabled;
+            InitBatteryTimer();
+            ApplyBatteryToTray();
+            UpdateBatterySummary();
+
+            // Final position reapply & centering after layout is complete
             Dispatcher.BeginInvoke(new Action(() =>
             {
+                CenterControllerIfDefault();
                 ReapplyButtonPositions();
             }), System.Windows.Threading.DispatcherPriority.Loaded);
+
+            // Re-center when window is resized (only if user hasn't manually positioned)
+            CanvasGamepad.SizeChanged += CanvasGamepad_SizeChanged;
+
+            // Check for updates after everything is ready
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                await CheckForUpdateAsync();
+            }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
 
             var args = Environment.GetCommandLineArgs();
             if (_settings.StartMinimized || args.Contains("--minimized"))
@@ -187,12 +281,6 @@ namespace TenzoraX
             ImgController.Width = 400 * scale;
             ImgController.Height = 230 * scale;
 
-            if (_isFreshStart)
-            {
-                _settings.ControllerLeft = Math.Max(0, (CanvasGamepad.ActualWidth - ImgController.Width) / 2);
-                _settings.ControllerTop = Math.Max(0, (CanvasGamepad.ActualHeight - ImgController.Height) / 2);
-                _isFreshStart = false;
-            }
             Canvas.SetLeft(ImgController, _settings.ControllerLeft);
             Canvas.SetTop(ImgController, _settings.ControllerTop);
 
@@ -356,6 +444,36 @@ namespace TenzoraX
             }
         }
 
+        private void CenterControllerIfDefault()
+        {
+            if (_settings.HasCustomPosition) return;
+
+            double cw = CanvasGamepad.ActualWidth;
+            double ch = CanvasGamepad.ActualHeight;
+            if (cw <= 0 || ch <= 0) return;
+
+            double imgW = ImgController.ActualWidth;
+            double imgH = ImgController.ActualHeight;
+            if (imgW <= 0 || imgH <= 0)
+            {
+                imgW = ImgController.Width;
+                imgH = ImgController.Height;
+            }
+            if (imgW <= 0 || imgH <= 0) return;
+
+            _settings.ControllerLeft = Math.Max(0, (cw - imgW) / 2);
+            _settings.ControllerTop = Math.Max(0, (ch - imgH) / 2);
+            Canvas.SetLeft(ImgController, _settings.ControllerLeft);
+            Canvas.SetTop(ImgController, _settings.ControllerTop);
+        }
+
+        private void CanvasGamepad_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            if (_settings.HasCustomPosition) return;
+            CenterControllerIfDefault();
+            ReapplyButtonPositions();
+        }
+
         private void ImgController_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (_settings.EditMode && _settings.EditModeType == "image")
@@ -412,6 +530,7 @@ namespace TenzoraX
                 
                 _settings.ControllerLeft = Canvas.GetLeft(ImgController);
                 _settings.ControllerTop = Canvas.GetTop(ImgController);
+                _settings.HasCustomPosition = true;
                 SaveSettings();
                 ReapplyButtonPositions();
                 e.Handled = true;
@@ -640,6 +759,10 @@ namespace TenzoraX
         {
             Dispatcher.Invoke(() =>
             {
+                // Track battery input time
+                if (_settings.BatteryEnabled && e.ControllerName != "None" && e.PressedButtons.Count > 0)
+                    _lastBatteryInputTime = DateTime.UtcNow;
+
                 if (e.ControllerName == "None")
                 {
                     TxtStatus.Text = Lang.Status_Disconnected;
@@ -682,7 +805,10 @@ namespace TenzoraX
                         if (!_physicallyHeldButtons.Contains(btnKey))
                         {
                             _physicallyHeldButtons.Add(btnKey);
-                            AddToTempCombo(btnKey);
+                            _capture.AddComboButton(btnKey);
+                            TxtSelectedCombo.Text = _capture.ComboDisplay;
+                            if (string.IsNullOrEmpty(_capture.ComboDisplay))
+                                TxtSelectedCombo.Text = Lang.Mapping_ComboPlaceholder;
                         }
                     }
                     else
@@ -707,7 +833,10 @@ namespace TenzoraX
                         if (!_physicallyHeldButtons.Contains(dir))
                         {
                             _physicallyHeldButtons.Add(dir);
-                            AddToTempCombo(dir);
+                            _capture.AddComboButton(dir);
+                            TxtSelectedCombo.Text = _capture.ComboDisplay;
+                            if (string.IsNullOrEmpty(_capture.ComboDisplay))
+                                TxtSelectedCombo.Text = Lang.Mapping_ComboPlaceholder;
                         }
                     }
                     else
@@ -732,28 +861,35 @@ namespace TenzoraX
 
         private void UpdateBatteryBar(string batteryInfo)
         {
+            if (_settings.BatteryEnabled)
+            {
+                UpdateCalculatedBatteryBar();
+                return;
+            }
+
+            // Fallback to old XInput battery bar
             double widthFraction;
             System.Windows.Media.Brush color;
 
             if (batteryInfo == "100%")
             {
                 widthFraction = 1.0;
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129)); // green
+                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129));
             }
             else if (batteryInfo == "67%")
             {
                 widthFraction = 0.67;
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(245, 158, 11)); // orange
+                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(245, 158, 11));
             }
             else if (batteryInfo == "33%")
             {
                 widthFraction = 0.33;
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(251, 146, 60)); // amber
+                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(251, 146, 60));
             }
             else if (batteryInfo == "0%")
             {
                 widthFraction = 0.05;
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68)); // red
+                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));
             }
             else
             {
@@ -761,10 +897,337 @@ namespace TenzoraX
                 color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(100, 100, 100));
             }
 
-            // BatteryIndicator inner width = 22px (padding 1px each side inside 24px outer)
             BatteryLevel.Width = Math.Max(2, 22 * widthFraction);
             BatteryLevel.Background = color;
         }
+
+        #region Battery Tracking
+
+        private void InitBatteryTimer()
+        {
+            _batteryTimer?.Stop();
+            if (!_settings.BatteryEnabled) return;
+
+            _batteryTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(1)
+            };
+            _batteryTimer.Tick += BatteryTimer_Tick;
+            _batteryTimer.Start();
+        }
+
+        private void BatteryTimer_Tick(object? sender, EventArgs e)
+        {
+            if (!_settings.BatteryEnabled || _settings.IsPaused) return;
+
+            bool isActive = (DateTime.UtcNow - _lastBatteryInputTime).TotalSeconds < BatteryActiveTimeoutSeconds;
+
+            if (isActive)
+            {
+                _settings.BatteryActiveMinutes += 1.0 / 60.0;
+                SaveSettings();
+            }
+
+            _batteryWasActiveLastTick = isActive;
+            UpdateCalculatedBatteryBar();
+            UpdateBatterySummary();
+        }
+
+        private double GetCalculatedBatteryPercent()
+        {
+            if (_settings.BatteryHours <= 0) return 100;
+            double totalMinutes = _settings.BatteryHours * 60;
+            double consumptionPerMinute = 100.0 / totalMinutes;
+            double used = _settings.BatteryActiveMinutes * consumptionPerMinute;
+            double percent = 100.0 - used;
+            return Math.Max(0, Math.Min(100, percent));
+        }
+
+        private void UpdateCalculatedBatteryBar()
+        {
+            double percent = GetCalculatedBatteryPercent();
+            string batteryInfo = $"{percent:F1}%";
+            TxtBattery.Text = batteryInfo;
+
+            double widthFraction = percent / 100.0;
+            System.Windows.Media.Brush color;
+            if (percent > 60)
+                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129));
+            else if (percent > 30)
+                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(245, 158, 11));
+            else if (percent > 10)
+                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(251, 146, 60));
+            else
+                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));
+
+            BatteryLevel.Width = Math.Max(2, 22 * widthFraction);
+            BatteryLevel.Background = color;
+
+            ApplyBatteryToTray();
+        }
+
+        private void UpdateBatteryCalculatedLabel()
+        {
+            double totalMinutes = _settings.BatteryHours * 60;
+            double consumptionPerMinute = totalMinutes > 0 ? 100.0 / totalMinutes : 0;
+            TxtBatteryCalculated.Text = Lang.Format("Battery_Calculated", (int)totalMinutes, consumptionPerMinute);
+        }
+
+        #endregion
+
+        #region Battery UI Handlers
+
+        private void ChkBatteryEnable_Changed(object sender, RoutedEventArgs e)
+        {
+            _settings.BatteryEnabled = ChkBatteryEnable.IsChecked == true;
+            PanelBatterySettings.Visibility = _settings.BatteryEnabled ? Visibility.Visible : Visibility.Collapsed;
+            UpdateBatterySummary();
+            SaveSettings();
+            InitBatteryTimer();
+            if (!_settings.BatteryEnabled)
+                RefreshGamepadsList(); // restore original XInput battery reading
+            else
+            {
+                _lastBatteryInputTime = DateTime.UtcNow;
+                UpdateCalculatedBatteryBar();
+            }
+        }
+
+        private void TxtBatteryHours_LostFocus(object sender, RoutedEventArgs e)
+        {
+            ApplyBatteryHours();
+        }
+
+        private void TxtBatteryHours_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                ApplyBatteryHours();
+                Keyboard.ClearFocus();
+                e.Handled = true;
+            }
+        }
+
+        private void ApplyBatteryHours()
+        {
+            if (double.TryParse(TxtBatteryHours.Text.Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out double hours))
+            {
+                if (hours < 0.5) hours = 0.5;
+                if (hours > 999) hours = 999;
+                _settings.BatteryHours = hours;
+                TxtBatteryHours.Text = hours.ToString("0.#");
+                SaveSettings();
+                UpdateBatteryCalculatedLabel();
+                UpdateCalculatedBatteryBar();
+            }
+            else
+            {
+                TxtBatteryHours.Text = _settings.BatteryHours.ToString("0.#");
+            }
+        }
+
+        private void ChkBatteryTray_Changed(object sender, RoutedEventArgs e)
+        {
+            _settings.BatteryTrayEnabled = ChkBatteryTray.IsChecked == true;
+            SaveSettings();
+            ApplyBatteryToTray();
+        }
+
+        private void ChkBatteryAnimation_Changed(object sender, RoutedEventArgs e)
+        {
+            _settings.BatteryAnimationEnabled = ChkBatteryAnimation.IsChecked == true;
+            SaveSettings();
+        }
+
+        private void BtnResetBattery_Click(object sender, RoutedEventArgs e)
+        {
+            _settings.BatteryActiveMinutes = 0;
+            _lastBatteryInputTime = DateTime.UtcNow;
+            SaveSettings();
+            UpdateCalculatedBatteryBar();
+        }
+
+        private void ApplyBatteryToTray()
+        {
+            if (_notifyIcon == null) return;
+
+            if (!_settings.BatteryEnabled || !_settings.BatteryTrayEnabled)
+            {
+                _notifyIcon.Icon = CreateControllerIcon();
+                _notifyIcon.Text = "TenzoraX";
+                _batteryLastIconPercent = -1;
+                return;
+            }
+
+            double percent = GetCalculatedBatteryPercent();
+            int intPercent = (int)Math.Round(percent);
+
+            // Build tooltip
+            string tip = $"TenzoraX\n{this.Lang.Battery_Label} {percent:F1}%";
+            if (_settings.IsPaused)
+                tip += $"\n{this.Lang.Status_Paused}";
+            else if ((DateTime.UtcNow - _lastBatteryInputTime).TotalSeconds < BatteryActiveTimeoutSeconds)
+                tip += $"\n{(Lang.CurrentLang == "de" ? "Controller aktiv" : "Controller active")}";
+            _notifyIcon.Text = tip;
+
+            // Only recreate icon when integer percentage changes
+            if (intPercent == _batteryLastIconPercent) return;
+            _batteryLastIconPercent = intPercent;
+
+            _notifyIcon.Icon = CreateBatteryIcon(percent);
+        }
+
+        private static void DrawRoundedRectangle(System.Drawing.Graphics g, System.Drawing.Pen pen, float x, float y, float w, float h, float r)
+        {
+            var path = new System.Drawing.Drawing2D.GraphicsPath();
+            path.AddArc(x, y, r * 2, r * 2, 180, 90);
+            path.AddArc(x + w - r * 2, y, r * 2, r * 2, 270, 90);
+            path.AddArc(x + w - r * 2, y + h - r * 2, r * 2, r * 2, 0, 90);
+            path.AddArc(x, y + h - r * 2, r * 2, r * 2, 90, 90);
+            path.CloseFigure();
+            g.DrawPath(pen, path);
+        }
+
+        private System.Drawing.Icon CreateBatteryIcon(double percent)
+        {
+            var bmp = new System.Drawing.Bitmap(32, 32);
+            using (var g = System.Drawing.Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.Clear(System.Drawing.Color.Transparent);
+
+                System.Drawing.Color color;
+                if (percent > 60)
+                    color = System.Drawing.Color.FromArgb(16, 185, 129);
+                else if (percent > 30)
+                    color = System.Drawing.Color.FromArgb(245, 158, 11);
+                else
+                    color = System.Drawing.Color.FromArgb(239, 68, 68);
+
+                // Battery body
+                float bodyX = 5, bodyY = 9, bodyW = 20, bodyH = 14;
+                float cornerR = 3;
+                using (var pen = new System.Drawing.Pen(color, 1.5f))
+                    DrawRoundedRectangle(g, pen, bodyX, bodyY, bodyW, bodyH, cornerR);
+
+                // Battery terminal (cap on top)
+                float termX = bodyX + bodyW / 2 - 2, termY = bodyY - 3, termW = 4, termH = 3;
+                using (var fillBrush = new System.Drawing.SolidBrush(color))
+                    g.FillRectangle(fillBrush, termX, termY, termW, termH);
+
+                // Inner fill
+                float fillX = bodyX + 2, fillY = bodyY + 2;
+                float fillMaxW = bodyW - 4;
+                float fillH = bodyH - 4;
+                float fillW = fillMaxW * (float)(percent / 100.0);
+                if (fillW > 0)
+                {
+                    using (var fillBrush = new System.Drawing.SolidBrush(color))
+                        g.FillRectangle(fillBrush, fillX, fillY, fillW, fillH);
+                }
+            }
+            return System.Drawing.Icon.FromHandle(bmp.GetHicon());
+        }
+
+        private void BtnToggleBattery_Click(object sender, RoutedEventArgs e)
+        {
+            _batterySettingsCollapsed = !_batterySettingsCollapsed;
+            PanelBatterySettings.Visibility = _batterySettingsCollapsed ? Visibility.Collapsed : Visibility.Visible;
+            BtnToggleBattery.Content = _batterySettingsCollapsed ? "▼" : "▲";
+            TxtBatterySummary.Visibility = _batterySettingsCollapsed ? Visibility.Visible : Visibility.Collapsed;
+            SaveSettings();
+        }
+
+        private void BtnConfirmBattery_Click(object sender, RoutedEventArgs e)
+        {
+            // Validate and save hours
+            if (double.TryParse(TxtBatteryHours.Text.Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out double hours))
+            {
+                if (hours < 0.5) hours = 0.5;
+                if (hours > 999) hours = 999;
+                _settings.BatteryHours = hours;
+                TxtBatteryHours.Text = hours.ToString("0.#");
+            }
+            else
+            {
+                TxtBatteryHours.Text = _settings.BatteryHours.ToString("0.#");
+            }
+
+            // Reset battery to 100% and enable battery system
+            _settings.BatteryActiveMinutes = 0;
+            _lastBatteryInputTime = DateTime.UtcNow;
+            _settings.BatteryEnabled = true;
+            ChkBatteryEnable.IsChecked = true;
+            PanelBatterySettings.Visibility = Visibility.Visible;
+
+            SaveSettings();
+            UpdateBatteryCalculatedLabel();
+            UpdateCalculatedBatteryBar();
+            InitBatteryTimer();
+
+            // Collapse settings after confirm
+            _batterySettingsCollapsed = true;
+            PanelBatterySettings.Visibility = Visibility.Collapsed;
+            UpdateBatterySummary();
+        }
+
+        private void UpdateBatterySummary()
+        {
+            if (!_settings.BatteryEnabled)
+            {
+                TxtBatterySummary.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            double percent = GetCalculatedBatteryPercent();
+            string status;
+            if (_settings.IsPaused)
+                status = Lang.CurrentLang == "de" ? "pausiert" : "paused";
+            else if ((DateTime.UtcNow - _lastBatteryInputTime).TotalSeconds < BatteryActiveTimeoutSeconds)
+                status = Lang.CurrentLang == "de" ? "aktiv" : "active";
+            else
+                status = Lang.CurrentLang == "de" ? "bereit" : "ready";
+
+            TxtBatterySummary.Text = $"{Lang.Battery_Label} {percent:F1}% – {status}";
+        }
+
+        private void ApplyOutputMode()
+        {
+            string mode = _settings.OutputMode;
+            InputSimulator.OutputMode = mode;
+
+            if (!InputSimulator.IsRunningAsAdmin())
+            {
+                Debug.WriteLine("Warning: Not running as admin. SendInput may be blocked from reaching elevated applications (e.g. RTSS running as admin).");
+            }
+        }
+
+        private void ComboOutputMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            string mode = ComboOutputMode.SelectedIndex == 1 ? "ScanCode" : "VK";
+            if (_settings.OutputMode != mode)
+            {
+                _settings.OutputMode = mode;
+                ApplyOutputMode();
+                SaveSettings();
+            }
+        }
+
+        private void ChkSound_Changed(object sender, RoutedEventArgs e)
+        {
+            _settings.SoundEnabled = ChkSound.IsChecked == true;
+            SoundManager.Enabled = _settings.SoundEnabled;
+            SaveSettings();
+        }
+
+        private void SliderSoundVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            _settings.SoundVolume = SliderSoundVolume.Value / 100.0;
+            SoundManager.Volume = _settings.SoundVolume;
+            SaveSettings();
+        }
+
+        #endregion
 
         #endregion
 
@@ -796,8 +1259,9 @@ namespace TenzoraX
             if (ComboProfiles.SelectedItem is string selectedProfile && ProfileManager.Instance.ActiveProfile.Name != selectedProfile)
             {
                 SelectProfile(selectedProfile);
-                UpdateTrayMenu();
-            }
+            UpdateTrayMenu();
+            UpdateBatterySummary();
+        }
         }
 
         private void BtnNewProfile_Click(object sender, RoutedEventArgs e)
@@ -838,25 +1302,10 @@ namespace TenzoraX
             if (!_settings.EditMode && sender is System.Windows.Controls.Button btn)
             {
                 string key = btn.Name.Replace("Btn_", "");
-                // Manuelles Klicken auf einen Controller-Button am Bildschirm erlaubt immer die Aufnahme
-                if (!_tempCombo.Contains(key))
-                {
-                    _tempCombo.Add(key);
-                    TxtSelectedCombo.Text = string.Join(" + ", _tempCombo);
-                }
-            }
-        }
-
-        private void AddToTempCombo(string key)
-        {
-            // Automatische Controller-Signal-Aufnahme nur, wenn der An/Aus-Schalter auf "An" ist
-            if (RbCaptureOn != null && RbCaptureOn.IsChecked != true)
-                return;
-
-            if (!_tempCombo.Contains(key))
-            {
-                _tempCombo.Add(key);
-                TxtSelectedCombo.Text = string.Join(" + ", _tempCombo);
+                _capture.AddComboButton(key);
+                TxtSelectedCombo.Text = _capture.ComboDisplay;
+                if (string.IsNullOrEmpty(_capture.ComboDisplay))
+                    TxtSelectedCombo.Text = Lang.Mapping_ComboPlaceholder;
             }
         }
 
@@ -864,46 +1313,47 @@ namespace TenzoraX
         {
             if (sender is System.Windows.Controls.Button btn)
             {
-                string key = btn.Content.ToString() ?? "";
-                if (!_tempAction.Contains(key))
-                {
-                    _tempAction.Add(key);
-                    TxtSelectedAction.Text = string.Join(" + ", _tempAction);
-                }
+                string key = btn.Tag as string ?? btn.Content.ToString() ?? "";
+                _capture.AddActionKey(key);
+                TxtSelectedAction.Text = _capture.ActionDisplay;
+                if (string.IsNullOrEmpty(_capture.ActionDisplay))
+                    TxtSelectedAction.Text = Lang.Mapping_ActionPlaceholder;
             }
         }
 
         private void BtnClearCombo_Click(object sender, RoutedEventArgs e)
         {
-            _tempCombo.Clear();
+            _capture.ClearCombo();
             TxtSelectedCombo.Text = Lang.Mapping_ComboPlaceholder;
         }
 
         private void BtnClearAction_Click(object sender, RoutedEventArgs e)
         {
-            _tempAction.Clear();
+            _capture.ClearAction();
             TxtSelectedAction.Text = Lang.Mapping_ActionPlaceholder;
         }
 
         private void BtnSaveMapping_Click(object sender, RoutedEventArgs e)
         {
-            if (_tempCombo.Count == 0 || _tempAction.Count == 0)
+            if (!_capture.HasCombo || !_capture.HasAction)
             {
                 System.Windows.MessageBox.Show(Lang.Dialog_MappingIncompleteMsg, Lang.Dialog_MappingIncompleteTitle, MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
-            var existing = ProfileManager.Instance.ActiveProfile.Mappings.FirstOrDefault(m => m.Combo.SequenceEqual(_tempCombo));
+            var existing = ProfileManager.Instance.ActiveProfile.Mappings.FirstOrDefault(m => m.Combo.SequenceEqual(_capture.CurrentCombo));
             if (existing != null)
-                existing.Action = new List<string>(_tempAction);
+                existing.Action = new List<string>(_capture.CurrentAction);
             else
-                ProfileManager.Instance.ActiveProfile.Mappings.Add(new Mapping { Combo = new List<string>(_tempCombo), Action = new List<string>(_tempAction) });
+                ProfileManager.Instance.ActiveProfile.Mappings.Add(new Mapping { Combo = new List<string>(_capture.CurrentCombo), Action = new List<string>(_capture.CurrentAction) });
 
             ProfileManager.Instance.SaveActiveProfile();
-            _tempCombo.Clear();
-            _tempAction.Clear();
+            _capture.Reset();
             TxtSelectedCombo.Text = Lang.Mapping_ComboPlaceholder;
             TxtSelectedAction.Text = Lang.Mapping_ActionPlaceholder;
+            BtnRecord.Content = Lang.Mapping_Record;
+            BtnRecord.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129));
+            BtnRecord.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(15, 44, 58));
             ListMappings.ItemsSource = null;
             ListMappings.ItemsSource = ProfileManager.Instance.ActiveProfile.Mappings;
         }
@@ -916,6 +1366,40 @@ namespace TenzoraX
                 ProfileManager.Instance.SaveActiveProfile();
                 ListMappings.ItemsSource = null;
                 ListMappings.ItemsSource = ProfileManager.Instance.ActiveProfile.Mappings;
+            }
+        }
+
+        private void BtnTestOutput_Click(object sender, RoutedEventArgs e)
+        {
+            var action = new List<string>();
+            if (_capture.HasAction)
+                action.AddRange(_capture.CurrentAction);
+            else if (ProfileManager.Instance.ActiveProfile.Mappings.Count > 0)
+                action.AddRange(ProfileManager.Instance.ActiveProfile.Mappings[0].Action);
+
+            if (action.Count > 0)
+                InputSimulator.SimulateCombination(action);
+        }
+
+        private void BtnRecord_Click(object sender, RoutedEventArgs e)
+        {
+            _capture.ToggleCapture();
+
+            if (_capture.IsCapturing)
+            {
+                _capture.ClearCombo();
+                _capture.ClearAction();
+                TxtSelectedCombo.Text = Lang.Mapping_ComboPlaceholder;
+                TxtSelectedAction.Text = Lang.Mapping_ActionPlaceholder;
+                BtnRecord.Content = Lang.Mapping_StopRecord;
+                BtnRecord.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));
+                BtnRecord.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(47, 20, 24));
+            }
+            else
+            {
+                BtnRecord.Content = Lang.Mapping_Record;
+                BtnRecord.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129));
+                BtnRecord.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(15, 44, 58));
             }
         }
 
@@ -938,13 +1422,20 @@ namespace TenzoraX
                 {
                     string json = File.ReadAllText(ConfigFilePath);
                     _settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+
+                    // Migration: existing config with a non-default ControllerLeft = user customized
+                    if (!_settings.HasCustomPosition)
+                    {
+                        double left = _settings.ControllerLeft;
+                        if (Math.Abs(left - 50) > 1 && Math.Abs(left) > 1)
+                            _settings.HasCustomPosition = true;
+                    }
                 }
                 catch { _settings = new AppSettings(); }
             }
             else
             {
                 _settings = new AppSettings();
-                _isFreshStart = true;
                 SaveSettings();
             }
 
@@ -1007,32 +1498,24 @@ namespace TenzoraX
             if (string.IsNullOrEmpty(lang))
             {
                 lang = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
-                if (lang != "de") lang = "en";
+                if (!Lang.HasLanguage(lang))
+                    lang = "en";
                 _settings.Language = lang;
                 SaveSettings();
             }
 
-            ComboLanguage.Items.Clear();
-            ComboLanguage.Items.Add("English");
-            ComboLanguage.Items.Add("Deutsch");
-
-            bool prev = _isLanguageInit;
-            _isLanguageInit = true;
-            ComboLanguage.SelectedIndex = lang == "de" ? 1 : 0;
-            _isLanguageInit = prev;
-
             ApplyLanguage(lang);
         }
 
-        private bool _isLanguageInit = false;
-
-        private void ComboLanguage_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private void LogCrash(string context, Exception ex)
         {
-            if (_isLanguageInit) return;
-            string lang = ComboLanguage.SelectedIndex == 1 ? "de" : "en";
-            _settings.Language = lang;
-            SaveSettings();
-            ApplyLanguage(lang);
+            try
+            {
+                string logPath = Path.Combine(GetDocumentsPath(), "crash.log");
+                string entry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {context}: {ex.Message}\n{ex.StackTrace}\n";
+                File.AppendAllText(logPath, entry);
+            }
+            catch { }
         }
 
         private void ApplyLanguage(string lang)
@@ -1040,6 +1523,19 @@ namespace TenzoraX
             Lang.Switch(lang);
             RefreshGamepadsList();
             UpdateTrayMenu();
+
+            int sel = ComboOutputMode.SelectedIndex;
+            ComboOutputMode.Items.Clear();
+            ComboOutputMode.Items.Add(Lang.OutputMode_VK);
+            ComboOutputMode.Items.Add(Lang.OutputMode_ScanCode);
+            ComboOutputMode.SelectedIndex = sel >= 0 ? sel : 0;
+
+            TxtAdminStatus.Text = InputSimulator.IsRunningAsAdmin() ? Lang.Edit_AdminElevated : Lang.Edit_AdminUser;
+
+            if (!_capture.IsCapturing)
+                BtnRecord.Content = Lang.Mapping_Record;
+            else
+                BtnRecord.Content = Lang.Mapping_StopRecord;
         }
 
         private void ChkEditMode_Checked(object sender, RoutedEventArgs e)
@@ -1154,16 +1650,47 @@ namespace TenzoraX
             }
         }
 
-        private void RbCaptureOn_Checked(object sender, RoutedEventArgs e)
+        private void UpdateAdminUI()
         {
-            _settings.CaptureEnabled = true;
-            SaveSettings();
+            bool isAdmin = InputSimulator.IsRunningAsAdmin();
+            TxtAdminStatus.Text = isAdmin ? Lang.Edit_AdminElevated : Lang.Edit_AdminUser;
+            TxtAdminStatus.Foreground = isAdmin
+                ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(245, 158, 11))
+                : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(148, 163, 184));
+            ChkAdminMode.IsChecked = _settings.RunAsAdministrator;
         }
 
-        private void RbCaptureOff_Checked(object sender, RoutedEventArgs e)
+        private void ChkAdminMode_Click(object sender, RoutedEventArgs e)
         {
-            _settings.CaptureEnabled = false;
+            bool newValue = ChkAdminMode.IsChecked == true;
+            _settings.RunAsAdministrator = newValue;
             SaveSettings();
+
+            if (newValue && !InputSimulator.IsRunningAsAdmin())
+            {
+                var result = System.Windows.MessageBox.Show(Lang.Dialog_RestartAsAdminMsg, Lang.Dialog_RestartAsAdminTitle, MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (result == MessageBoxResult.Yes)
+                {
+                    try
+                    {
+                        var argStr = string.Join(" ", Environment.GetCommandLineArgs().Skip(1)
+                            .Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
+                        var psi = new ProcessStartInfo
+                        {
+                            FileName = Environment.ProcessPath,
+                            UseShellExecute = true,
+                            Verb = "runas",
+                            Arguments = argStr
+                        };
+                        Process.Start(psi);
+                        Environment.Exit(0);
+                    }
+                    catch
+                    {
+                        System.Windows.MessageBox.Show("Failed to restart as administrator.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                }
+            }
         }
 
         private void BtnResetControllerImage_Click(object sender, RoutedEventArgs e)
@@ -1173,7 +1700,7 @@ namespace TenzoraX
             {
                 _settings.ControllerImagePath = "";
                 _settings.ControllerScale = 1.0;
-                _isFreshStart = true;
+                _settings.HasCustomPosition = false;
                 LoadControllerBackground();
                 SaveSettings();
             }
@@ -1234,6 +1761,31 @@ namespace TenzoraX
             catch (Exception ex)
             {
                 System.Windows.MessageBox.Show(Lang.Format("Dialog_AutostartErrorMsg", ex.Message), Lang.Dialog_AutostartErrorTitle, MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        #endregion
+
+        #region Update Check
+
+        private async System.Threading.Tasks.Task CheckForUpdateAsync()
+        {
+            var info = await UpdateManager.CheckForUpdate();
+            if (info == null) return;
+
+            UpdateDialog? dlg = null;
+            await Dispatcher.InvokeAsync(() =>
+            {
+                dlg = UpdateDialog.ShowUpdate(this, info);
+            });
+
+            if (dlg?.DownloadedExePath != null && System.IO.File.Exists(dlg.DownloadedExePath))
+            {
+                try
+                {
+                    UpdateManager.InstallUpdate(dlg.DownloadedExePath);
+                }
+                catch { }
             }
         }
 
