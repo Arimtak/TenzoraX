@@ -32,28 +32,42 @@ namespace TenzoraX
         private void BtnUpdate_Click(object sender, RoutedEventArgs e)
         {
             BtnUpdateNow.IsEnabled = false;
-            var lang = LanguageManager.Instance;
-            string loading = lang.CurrentLang == "de" ? "Lade..." : "Loading...";
-            string retry = lang.CurrentLang == "de" ? "Wiederholen" : "Retry";
-            BtnUpdateNow.Content = loading;
+            BtnUpdateLater.IsEnabled = false;
+            BtnUpdateNow.Content = "Wird geladen...";
+            PanelProgress.Visibility = Visibility.Visible;
+
+            TxtProgressStatus.Text = "Update wird heruntergeladen...";
+
+            var progress = new Progress<int>(pct =>
+            {
+                ProgressBar.Value = pct;
+                TxtProgressPct.Text = $"{pct} %";
+            });
 
             var worker = new BackgroundWorker();
             worker.DoWork += (s, args) =>
             {
-                args.Result = UpdateManager.DownloadUpdate(_info.DownloadUrl).GetAwaiter().GetResult();
+                args.Result = UpdateManager.DownloadUpdate(_info.DownloadUrl, progress).GetAwaiter().GetResult();
             };
             worker.RunWorkerCompleted += (s, args) =>
             {
                 if (args.Result is string exePath && File.Exists(exePath))
                 {
+                    TxtProgressStatus.Text = "Update wird installiert...";
+                    ProgressBar.Value = 100;
+                    TxtProgressPct.Text = "100 %";
+
                     DownloadedExePath = exePath;
                     _updateNow = true;
                     Close();
                 }
                 else
                 {
-                    BtnUpdateNow.Content = retry;
+                    TxtProgressStatus.Text = "Download fehlgeschlagen. Bitte erneut versuchen.";
+                    BtnUpdateNow.Content = "Wiederholen";
                     BtnUpdateNow.IsEnabled = true;
+                    BtnUpdateLater.IsEnabled = true;
+                    PanelProgress.Visibility = Visibility.Collapsed;
                 }
             };
             worker.RunWorkerAsync();

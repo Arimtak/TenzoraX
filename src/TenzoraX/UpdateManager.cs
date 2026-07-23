@@ -66,7 +66,7 @@ namespace TenzoraX
             catch { return null; }
         }
 
-        public static async Task<string?> DownloadUpdate(string url)
+        public static async Task<string?> DownloadUpdate(string url, IProgress<int>? progress = null)
         {
             try
             {
@@ -76,11 +76,24 @@ namespace TenzoraX
 
                 var req = new HttpRequestMessage(HttpMethod.Get, url);
                 req.Headers.UserAgent.ParseAdd("TenzoraX-Updater/1.0");
-                using var resp = await _http.SendAsync(req);
+
+                using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
                 if (!resp.IsSuccessStatusCode) return null;
 
-                using (var fs = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None))
-                    await resp.Content.CopyToAsync(fs);
+                long totalBytes = resp.Content.Headers.ContentLength ?? -1;
+                using var stream = await resp.Content.ReadAsStreamAsync();
+                using var fs = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None);
+
+                byte[] buffer = new byte[8192];
+                long totalRead = 0;
+                int bytesRead;
+                while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                {
+                    await fs.WriteAsync(buffer, 0, bytesRead);
+                    totalRead += bytesRead;
+                    if (progress != null && totalBytes > 0)
+                        progress.Report((int)(totalRead * 100 / totalBytes));
+                }
 
                 string extractDir = Path.Combine(tempDir, "extracted");
                 if (Directory.Exists(extractDir))
@@ -104,6 +117,7 @@ namespace TenzoraX
             string batchDir = Path.Combine(Path.GetTempPath(), "TenzoraXUpdate");
             Directory.CreateDirectory(batchDir);
             string batchPath = Path.Combine(batchDir, "update.bat");
+            string targetDir = Path.GetDirectoryName(currentExe) ?? "";
 
             string batchContent = $@"@echo off
 setlocal
@@ -120,14 +134,12 @@ if not errorlevel 1 (
 
 %SystemRoot%\System32\timeout.exe /t 1 /nobreak >nul
 
-%SystemRoot%\System32\move.exe /Y ""%target%"" ""%target%.bak"" >nul 2>&1
-%SystemRoot%\System32\move.exe /Y ""%newExe%"" ""%target%"" >nul 2>&1
+%SystemRoot%\System32\del.exe /F /Q ""%target%"" >nul 2>&1
+%SystemRoot%\System32\copy.exe /Y ""%newExe%"" ""%target%"" >nul 2>&1
 
-if exist ""%target%.bak"" %SystemRoot%\System32\del.exe ""%target%.bak"" >nul 2>&1
+start """" /D ""{targetDir}"" ""%target%""
 
-start """" ""%target%""
-
-del ""%~f0"" >nul 2>&1
+%SystemRoot%\System32\del.exe /F /Q ""%~f0"" >nul 2>&1
 ";
 
             File.WriteAllText(batchPath, batchContent);
@@ -142,6 +154,17 @@ del ""%~f0"" >nul 2>&1
 
             Process.Start(psi);
             Environment.Exit(0);
+        }
+
+        public static void CleanupTemp()
+        {
+            try
+            {
+                string tempDir = Path.Combine(Path.GetTempPath(), "TenzoraXUpdate");
+                if (Directory.Exists(tempDir))
+                    Directory.Delete(tempDir, true);
+            }
+            catch { }
         }
 
         private static int CompareVersions(string a, string b)
