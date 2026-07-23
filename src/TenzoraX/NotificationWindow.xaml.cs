@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 
@@ -9,25 +10,64 @@ namespace TenzoraX
     public partial class NotificationWindow : Window
     {
         private readonly double _duration;
+        private bool _isDragging;
+        private System.Windows.Point _dragStart;
         private static string LogPath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             "TenzoraX", "notification.log");
 
-        public NotificationWindow(string combo, string action, double duration)
+        public NotificationWindow(string combo, string action, double duration, double width)
         {
             try
             {
                 InitializeComponent();
-                Log("NotificationWindow created");
+                Width = width;
+                ProgressBar.Width = width - 40;
+                Log("NotificationWindow created, width=" + width);
             }
             catch (Exception ex)
             {
-                Log("NotificationWindow InitializeComponent ERROR: " + ex.Message);
+                Log("NotificationWindow init ERROR: " + ex.Message);
             }
 
             TxtCombo.Text = combo;
             TxtAction.Text = action;
             _duration = duration;
+
+            MouseDown += OnMouseDown;
+            MouseMove += OnMouseMove;
+            MouseUp += OnMouseUp;
+        }
+
+        private void OnMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (e.LeftButton == System.Windows.Input.MouseButtonState.Pressed)
+            {
+                _isDragging = true;
+                _dragStart = new System.Windows.Point(Left, Top);
+                CaptureMouse();
+                Log("Drag started");
+            }
+        }
+
+        private void OnMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            if (_isDragging)
+            {
+                var pos = PointToScreen(e.GetPosition(this));
+                Left = pos.X;
+                Top = pos.Y;
+            }
+        }
+
+        private void OnMouseUp(object sender, MouseButtonEventArgs e)
+        {
+            if (_isDragging)
+            {
+                _isDragging = false;
+                ReleaseMouseCapture();
+                Log($"Drag ended: X={Left} Y={Top}");
+            }
         }
 
         public void BeginAnimation()
@@ -37,9 +77,8 @@ namespace TenzoraX
                 Log("BeginAnimation started, duration=" + _duration);
 
                 double barWidth = ProgressBar.Width;
-                Log("ProgressBar width=" + barWidth);
 
-                var slideIn = new DoubleAnimation(-320, 0, TimeSpan.FromMilliseconds(350));
+                var slideIn = new DoubleAnimation(-360, 0, TimeSpan.FromMilliseconds(350));
                 slideIn.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
                 SlideTransform.BeginAnimation(TranslateTransform.XProperty, slideIn);
 
@@ -53,7 +92,6 @@ namespace TenzoraX
 
                 int totalMs = 400 + (int)(_duration * 1000);
                 var totalVisible = TimeSpan.FromMilliseconds(totalMs);
-                Log("Total visible time: " + totalMs + "ms");
 
                 var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(250));
                 fadeOut.BeginTime = totalVisible;
@@ -62,19 +100,19 @@ namespace TenzoraX
                     try
                     {
                         BeginAnimation(OpacityProperty, null);
-                        Log("Closing notification window");
+                        Log("Closing notification");
                         Close();
                     }
                     catch (Exception ex) { Log("Close error: " + ex.Message); }
                 };
                 BeginAnimation(OpacityProperty, fadeOut);
 
-                var slideOut = new DoubleAnimation(0, -320, TimeSpan.FromMilliseconds(300));
+                var slideOut = new DoubleAnimation(0, -360, TimeSpan.FromMilliseconds(300));
                 slideOut.BeginTime = totalVisible;
                 slideOut.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn };
                 SlideTransform.BeginAnimation(TranslateTransform.XProperty, slideOut);
 
-                Log("BeginAnimation completed setup");
+                Log("BeginAnimation setup done");
             }
             catch (Exception ex)
             {

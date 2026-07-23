@@ -84,6 +84,9 @@ namespace TenzoraX
         public bool HasCustomPosition { get; set; } = false;
         public bool HotkeyNotificationsEnabled { get; set; } = true;
         public double NotificationDuration { get; set; } = 1.5;
+        public double NotificationWidth { get; set; } = 360;
+        public double NotificationPositionX { get; set; } = -1;
+        public double NotificationPositionY { get; set; } = -1;
     }
 
     public partial class MainWindow : Window
@@ -251,6 +254,9 @@ namespace TenzoraX
             ChkNotification.IsChecked = _settings.HotkeyNotificationsEnabled;
             NotificationManager.Enabled = _settings.HotkeyNotificationsEnabled;
             NotificationManager.Duration = _settings.NotificationDuration;
+            NotificationManager.NotificationWidth = _settings.NotificationWidth;
+            NotificationManager.SavedPosX = _settings.NotificationPositionX;
+            NotificationManager.SavedPosY = _settings.NotificationPositionY;
             SliderNotificationDuration.Value = _settings.NotificationDuration;
 
             // Battery UI initialization
@@ -1901,6 +1907,10 @@ namespace TenzoraX
 
         private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
+            // Save notification position before exit
+            _settings.NotificationPositionX = NotificationManager.SavedPosX;
+            _settings.NotificationPositionY = NotificationManager.SavedPosY;
+            _settings.NotificationWidth = NotificationManager.NotificationWidth;
             SaveSettings();
 
             if (!_isExplicitClose)
