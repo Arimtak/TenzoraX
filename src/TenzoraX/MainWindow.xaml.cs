@@ -164,6 +164,12 @@ namespace TenzoraX
             InitializeGamepadButtonMap();
             LoadSettings();
 
+            // Cleanup: remove any leftover .old.exe from old update versions
+            string oldExe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TenzoraX.old.exe");
+            if (File.Exists(oldExe)) try { File.Delete(oldExe); } catch { }
+            string oldExe2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TenzoraX.exe.bak");
+            if (File.Exists(oldExe2)) try { File.Delete(oldExe2); } catch { }
+
             // Auto-elevate if setting is enabled (silent – no dialog)
             if (_settings.RunAsAdministrator && !InputSimulator.IsRunningAsAdmin())
             {

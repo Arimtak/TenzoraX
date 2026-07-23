@@ -124,6 +124,7 @@ setlocal
 set ""target={currentExe}""
 set ""newExe={newExePath}""
 set ""pid={pid}""
+set ""dir={targetDir}""
 
 :wait
 %SystemRoot%\System32\tasklist.exe /FI ""PID eq %pid%"" 2>nul | %SystemRoot%\System32\findstr.exe /I ""%pid%"" >nul
@@ -133,6 +134,9 @@ if not errorlevel 1 (
 )
 
 %SystemRoot%\System32\timeout.exe /t 1 /nobreak >nul
+
+:: Delete any leftover .old.exe from old update code
+%SystemRoot%\System32\del.exe /F /Q ""%dir%\TenzoraX.old.exe"" >nul 2>&1
 
 %SystemRoot%\System32\del.exe /F /Q ""%target%"" >nul 2>&1
 %SystemRoot%\System32\copy.exe /Y ""%newExe%"" ""%target%"" >nul 2>&1
