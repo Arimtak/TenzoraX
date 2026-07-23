@@ -496,6 +496,29 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- Notification Settings -->
+                    <Border Background="#0D0D12" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="10" Margin="0,0,0,6">
+                        <StackPanel>
+                            <CheckBox x:Name="ChkNotification" Content="Hotkey-Notifications anzeigen" Checked="ChkNotification_Changed" Unchecked="ChkNotification_Changed" FontWeight="SemiBold" Margin="0,0,0,4" Foreground="White"/>
+                            <Grid Margin="16,0,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Anzeigedauer:" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <Slider x:Name="SliderNotificationDuration" Grid.Column="1" Minimum="0.5" Maximum="5" Value="1.5" TickFrequency="0.5" TickPlacement="Bottom" ValueChanged="SliderNotificationDuration_ValueChanged" Height="20" IsSnapToTickEnabled="True"/>
+                            </Grid>
+                            <Grid Margin="16,0,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Monitor:" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <ComboBox x:Name="ComboNotificationMonitor" Grid.Column="1" SelectionChanged="ComboNotificationMonitor_SelectionChanged" Height="22" FontSize="10"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
                     <!-- Battery Settings -->
                     <Border Background="#0D0D12" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="10" Margin="0,0,0,0">
                         <StackPanel>

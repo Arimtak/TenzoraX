@@ -82,6 +82,9 @@ namespace TenzoraX
         public double SoundVolume { get; set; } = 0.5;
         public bool RunAsAdministrator { get; set; } = false;
         public bool HasCustomPosition { get; set; } = false;
+        public bool HotkeyNotificationsEnabled { get; set; } = true;
+        public int NotificationMonitorIndex { get; set; } = -1;
+        public double NotificationDuration { get; set; } = 1.5;
     }
 
     public partial class MainWindow : Window
@@ -236,6 +239,14 @@ namespace TenzoraX
             SoundManager.Enabled = _settings.SoundEnabled;
             SliderSoundVolume.Value = _settings.SoundVolume * 100;
             SoundManager.Volume = _settings.SoundVolume;
+
+            // Notification settings
+            ChkNotification.IsChecked = _settings.HotkeyNotificationsEnabled;
+            NotificationManager.Enabled = _settings.HotkeyNotificationsEnabled;
+            NotificationManager.Duration = _settings.NotificationDuration;
+            NotificationManager.MonitorIndex = _settings.NotificationMonitorIndex;
+            SliderNotificationDuration.Value = _settings.NotificationDuration;
+            PopulateNotificationMonitorCombo();
 
             // Battery UI initialization
             ChkBatteryEnable.IsChecked = _settings.BatteryEnabled;
@@ -1232,6 +1243,45 @@ namespace TenzoraX
             _settings.SoundVolume = SliderSoundVolume.Value / 100.0;
             SoundManager.Volume = _settings.SoundVolume;
             SaveSettings();
+        }
+
+        private void ChkNotification_Changed(object sender, RoutedEventArgs e)
+        {
+            _settings.HotkeyNotificationsEnabled = ChkNotification.IsChecked == true;
+            NotificationManager.Enabled = _settings.HotkeyNotificationsEnabled;
+            SaveSettings();
+        }
+
+        private void SliderNotificationDuration_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            _settings.NotificationDuration = SliderNotificationDuration.Value;
+            NotificationManager.Duration = _settings.NotificationDuration;
+            SaveSettings();
+        }
+
+        private void ComboNotificationMonitor_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (ComboNotificationMonitor.SelectedIndex >= 0)
+            {
+                _settings.NotificationMonitorIndex = ComboNotificationMonitor.SelectedIndex;
+                NotificationManager.MonitorIndex = _settings.NotificationMonitorIndex;
+                SaveSettings();
+            }
+        }
+
+        private void PopulateNotificationMonitorCombo()
+        {
+            ComboNotificationMonitor.Items.Clear();
+            int count = NotificationManager.GetMonitorCount();
+            var names = NotificationManager.GetMonitorNames();
+            for (int i = 0; i < count; i++)
+                ComboNotificationMonitor.Items.Add(names[i]);
+
+            int idx = _settings.NotificationMonitorIndex;
+            if (idx >= 0 && idx < count)
+                ComboNotificationMonitor.SelectedIndex = idx;
+            else
+                ComboNotificationMonitor.SelectedIndex = 0;
         }
 
         #endregion

@@ -155,12 +155,17 @@ namespace TenzoraX
                     if (!_triggeredMappings.Contains(mapping))
                     {
                         _triggeredMappings.Add(mapping);
+                        string combo = mapping.DisplayCombo;
+                        string action = mapping.DisplayAction;
                         // Trigger key down in background thread
                         Task.Run(() =>
                         {
                             InputSimulator.SimulateKeyDown(mapping.Action);
                             SoundManager.PlayConfirmation();
                         });
+                        // Show notification on UI thread
+                        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                            NotificationManager.Show(combo, action));
                     }
                 }
                 else
