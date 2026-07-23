@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -70,7 +71,7 @@ namespace TenzoraX
             }
         }
 
-        public void BeginAnimation()
+        public async void BeginAnimation()
         {
             try
             {
@@ -78,24 +79,34 @@ namespace TenzoraX
 
                 double barWidth = ProgressBar.Width;
 
-                var slideIn = new DoubleAnimation(-360, 0, TimeSpan.FromMilliseconds(600));
+                // ===== PHASE 1: Slide In (0.8s) =====
+                Log("Phase 1: Slide in");
+
+                var slideIn = new DoubleAnimation(-360, 0, TimeSpan.FromMilliseconds(800));
                 slideIn.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
                 SlideTransform.BeginAnimation(TranslateTransform.XProperty, slideIn);
 
-                var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(250));
+                var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(300));
                 BeginAnimation(OpacityProperty, fadeIn);
 
-                int slideInMs = 650;
-                var progressDelay = TimeSpan.FromMilliseconds(slideInMs);
+                await Task.Delay(800);
+
+                // ===== PHASE 2: Visible / Wait (_duration seconds) =====
+                Log("Phase 2: Waiting " + _duration + "s");
+
                 var progress = new DoubleAnimation(barWidth, 0, TimeSpan.FromSeconds(_duration));
-                progress.BeginTime = progressDelay;
                 ProgressBar.BeginAnimation(FrameworkElement.WidthProperty, progress);
 
-                int totalMs = slideInMs + (int)(_duration * 1000);
-                var totalVisible = TimeSpan.FromMilliseconds(totalMs);
+                await Task.Delay((int)(_duration * 1000));
 
-                var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(800));
-                fadeOut.BeginTime = totalVisible;
+                // ===== PHASE 3: Slide Out (0.9s) =====
+                Log("Phase 3: Slide out");
+
+                var slideOut = new DoubleAnimation(0, -360, TimeSpan.FromMilliseconds(900));
+                slideOut.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn };
+                SlideTransform.BeginAnimation(TranslateTransform.XProperty, slideOut);
+
+                var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(900));
                 fadeOut.Completed += (s, e) =>
                 {
                     try
@@ -108,12 +119,7 @@ namespace TenzoraX
                 };
                 BeginAnimation(OpacityProperty, fadeOut);
 
-                var slideOut = new DoubleAnimation(0, -360, TimeSpan.FromMilliseconds(800));
-                slideOut.BeginTime = totalVisible;
-                slideOut.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn };
-                SlideTransform.BeginAnimation(TranslateTransform.XProperty, slideOut);
-
-                Log("BeginAnimation setup done");
+                Log("BeginAnimation phases complete");
             }
             catch (Exception ex)
             {

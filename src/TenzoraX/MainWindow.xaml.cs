@@ -83,7 +83,7 @@ namespace TenzoraX
         public bool RunAsAdministrator { get; set; } = false;
         public bool HasCustomPosition { get; set; } = false;
         public bool HotkeyNotificationsEnabled { get; set; } = true;
-        public double NotificationDuration { get; set; } = 4.0;
+        public double NotificationDuration { get; set; } = 5.0;
         public double NotificationWidth { get; set; } = 360;
         public double NotificationPositionX { get; set; } = -1;
         public double NotificationPositionY { get; set; } = -1;

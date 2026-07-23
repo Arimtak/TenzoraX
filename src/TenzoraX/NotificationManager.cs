@@ -9,7 +9,7 @@ namespace TenzoraX
     {
         private static readonly List<NotificationWindow> _activeNotifications = new();
         private static bool _enabled = true;
-        private static double _duration = 1.5;
+        private static double _duration = 5.0;
         private static double _savedWidth = 360;
         private static double _savedPosX = -1;
         private static double _savedPosY = -1;
