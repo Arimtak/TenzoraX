@@ -97,28 +97,50 @@ namespace TenzoraX
 
         public static void InstallUpdate(string newExePath)
         {
-            string appDir = AppDomain.CurrentDomain.BaseDirectory;
             string currentExe = Process.GetCurrentProcess().MainModule?.FileName ?? "";
-            string currentExeName = Path.GetFileName(currentExe) + ".exe";
-            if (!currentExe.EndsWith(".exe")) currentExeName = Path.GetFileName(currentExe);
+            if (string.IsNullOrEmpty(currentExe)) return;
 
-            string oldExe = Path.Combine(appDir, Path.GetFileNameWithoutExtension(currentExe) + ".old.exe");
-            string targetExe = Path.Combine(appDir, Path.GetFileName(currentExe));
+            int pid = Process.GetCurrentProcess().Id;
+            string batchDir = Path.Combine(Path.GetTempPath(), "TenzoraXUpdate");
+            Directory.CreateDirectory(batchDir);
+            string batchPath = Path.Combine(batchDir, "update.bat");
 
-            try
+            string batchContent = $@"@echo off
+setlocal
+set ""target={currentExe}""
+set ""newExe={newExePath}""
+set ""pid={pid}""
+
+:wait
+%SystemRoot%\System32\tasklist.exe /FI ""PID eq %pid%"" 2>nul | %SystemRoot%\System32\findstr.exe /I ""%pid%"" >nul
+if not errorlevel 1 (
+    %SystemRoot%\System32\timeout.exe /t 1 /nobreak >nul
+    goto wait
+)
+
+%SystemRoot%\System32\timeout.exe /t 1 /nobreak >nul
+
+%SystemRoot%\System32\move.exe /Y ""%target%"" ""%target%.bak"" >nul 2>&1
+%SystemRoot%\System32\move.exe /Y ""%newExe%"" ""%target%"" >nul 2>&1
+
+if exist ""%target%.bak"" %SystemRoot%\System32\del.exe ""%target%.bak"" >nul 2>&1
+
+start """" ""%target%""
+
+del ""%~f0"" >nul 2>&1
+";
+
+            File.WriteAllText(batchPath, batchContent);
+
+            var psi = new ProcessStartInfo
             {
-                if (File.Exists(oldExe)) File.Delete(oldExe);
-                File.Move(targetExe, oldExe);
-                File.Move(newExePath, targetExe);
-            }
-            catch
-            {
-                // Restore on failure
-                try { File.Move(oldExe, targetExe); } catch { }
-                throw;
-            }
+                FileName = "cmd.exe",
+                Arguments = $"/c \"{batchPath}\"",
+                CreateNoWindow = true,
+                UseShellExecute = false
+            };
 
-            Process.Start(targetExe);
+            Process.Start(psi);
             Environment.Exit(0);
         }
 

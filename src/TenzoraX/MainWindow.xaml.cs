@@ -156,12 +156,16 @@ namespace TenzoraX
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
+            SplashWindow.SetStatus("Fenster wird vorbereitet...", 5);
+
             IntPtr hwnd = new WindowInteropHelper(this).Handle;
             int useImmersiveDarkMode = 1;
             DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useImmersiveDarkMode, sizeof(int));
 
             Icon = CreateControllerIconSource();
             InitializeGamepadButtonMap();
+
+            SplashWindow.SetStatus("Konfiguration wird geladen...", 15);
             LoadSettings();
 
             // Auto-elevate if setting is enabled (silent – no dialog)
@@ -186,6 +190,7 @@ namespace TenzoraX
                 Environment.Exit(0);
             }
 
+            SplashWindow.SetStatus("Sprache wird geladen...", 25);
             InitLanguage();
             DataContext = LanguageManager.Instance;
             LoadButtonPositions();
@@ -194,13 +199,17 @@ namespace TenzoraX
             InitializeTrayIcon();
             InitializeDragHandlers();
 
+            SplashWindow.SetStatus("Controller werden erkannt...", 40);
             ControllerManager.Instance.GamepadsChanged += OnGamepadsChanged;
             ControllerManager.Instance.StateChanged += OnControllerStateChanged;
             ControllerManager.Instance.Initialize();
             RefreshGamepadsList();
 
+            SplashWindow.SetStatus("Mappings werden geladen...", 55);
             RefreshProfilesList();
             SelectProfile(_settings.LastActiveProfile);
+
+            SplashWindow.SetStatus("Einstellungen werden übernommen...", 70);
 
             ChkEditMode.IsChecked = _settings.EditMode;
             if (_settings.EditMode)
@@ -248,6 +257,7 @@ namespace TenzoraX
             {
                 CenterControllerIfDefault();
                 ReapplyButtonPositions();
+                SplashWindow.CloseSplash();
             }), System.Windows.Threading.DispatcherPriority.Loaded);
 
             // Re-center when window is resized (only if user hasn't manually positioned)
@@ -256,7 +266,9 @@ namespace TenzoraX
             // Check for updates after everything is ready
             Dispatcher.BeginInvoke(new Action(async () =>
             {
+                SplashWindow.SetStatus("Nach Updates wird gesucht...", 95);
                 await CheckForUpdateAsync();
+                SplashWindow.SetStatus("Fertig", 100);
             }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
 
             var args = Environment.GetCommandLineArgs();
