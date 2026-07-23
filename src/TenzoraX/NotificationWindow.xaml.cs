@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -8,17 +9,22 @@ namespace TenzoraX
     public partial class NotificationWindow : Window
     {
         private readonly double _duration;
+        private static string LogPath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "TenzoraX", "notification.log");
 
         public NotificationWindow(string combo, string action, double duration)
         {
             try
             {
                 InitializeComponent();
+                Log("NotificationWindow created");
             }
-            catch
+            catch (Exception ex)
             {
-                // Fallback: create minimal window in code
+                Log("NotificationWindow InitializeComponent ERROR: " + ex.Message);
             }
+
             TxtCombo.Text = combo;
             TxtAction.Text = action;
             _duration = duration;
@@ -28,7 +34,10 @@ namespace TenzoraX
         {
             try
             {
+                Log("BeginAnimation started, duration=" + _duration);
+
                 double barWidth = ProgressBar.Width;
+                Log("ProgressBar width=" + barWidth);
 
                 var slideIn = new DoubleAnimation(-320, 0, TimeSpan.FromMilliseconds(350));
                 slideIn.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
@@ -44,6 +53,7 @@ namespace TenzoraX
 
                 int totalMs = 400 + (int)(_duration * 1000);
                 var totalVisible = TimeSpan.FromMilliseconds(totalMs);
+                Log("Total visible time: " + totalMs + "ms");
 
                 var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(250));
                 fadeOut.BeginTime = totalVisible;
@@ -52,9 +62,10 @@ namespace TenzoraX
                     try
                     {
                         BeginAnimation(OpacityProperty, null);
+                        Log("Closing notification window");
                         Close();
                     }
-                    catch { }
+                    catch (Exception ex) { Log("Close error: " + ex.Message); }
                 };
                 BeginAnimation(OpacityProperty, fadeOut);
 
@@ -62,10 +73,12 @@ namespace TenzoraX
                 slideOut.BeginTime = totalVisible;
                 slideOut.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn };
                 SlideTransform.BeginAnimation(TranslateTransform.XProperty, slideOut);
+
+                Log("BeginAnimation completed setup");
             }
-            catch
+            catch (Exception ex)
             {
-                // Animation failed – close immediately
+                Log("BeginAnimation ERROR: " + ex.GetType().Name + ": " + ex.Message);
                 try { Close(); } catch { }
             }
         }
@@ -77,6 +90,19 @@ namespace TenzoraX
                 var anim = new DoubleAnimation(targetY, TimeSpan.FromMilliseconds(300));
                 anim.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
                 BeginAnimation(TopProperty, anim);
+            }
+            catch (Exception ex) { Log("AnimateTop error: " + ex.Message); }
+        }
+
+        private static void Log(string message)
+        {
+            try
+            {
+                string? dir = Path.GetDirectoryName(LogPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+                string entry = $"[{DateTime.Now:HH:mm:ss.fff}] {message}\n";
+                File.AppendAllText(LogPath, entry);
             }
             catch { }
         }

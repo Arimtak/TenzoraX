@@ -83,7 +83,6 @@ namespace TenzoraX
         public bool RunAsAdministrator { get; set; } = false;
         public bool HasCustomPosition { get; set; } = false;
         public bool HotkeyNotificationsEnabled { get; set; } = true;
-        public int NotificationMonitorIndex { get; set; } = -1;
         public double NotificationDuration { get; set; } = 1.5;
     }
 
@@ -252,9 +251,7 @@ namespace TenzoraX
             ChkNotification.IsChecked = _settings.HotkeyNotificationsEnabled;
             NotificationManager.Enabled = _settings.HotkeyNotificationsEnabled;
             NotificationManager.Duration = _settings.NotificationDuration;
-            NotificationManager.MonitorIndex = _settings.NotificationMonitorIndex;
             SliderNotificationDuration.Value = _settings.NotificationDuration;
-            PopulateNotificationMonitorCombo();
 
             // Battery UI initialization
             ChkBatteryEnable.IsChecked = _settings.BatteryEnabled;
@@ -1275,31 +1272,6 @@ namespace TenzoraX
             _settings.NotificationDuration = SliderNotificationDuration.Value;
             NotificationManager.Duration = _settings.NotificationDuration;
             SaveSettings();
-        }
-
-        private void ComboNotificationMonitor_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (ComboNotificationMonitor.SelectedIndex >= 0)
-            {
-                _settings.NotificationMonitorIndex = ComboNotificationMonitor.SelectedIndex;
-                NotificationManager.MonitorIndex = _settings.NotificationMonitorIndex;
-                SaveSettings();
-            }
-        }
-
-        private void PopulateNotificationMonitorCombo()
-        {
-            ComboNotificationMonitor.Items.Clear();
-            int count = NotificationManager.GetMonitorCount();
-            var names = NotificationManager.GetMonitorNames();
-            for (int i = 0; i < count; i++)
-                ComboNotificationMonitor.Items.Add(names[i]);
-
-            int idx = _settings.NotificationMonitorIndex;
-            if (idx >= 0 && idx < count)
-                ComboNotificationMonitor.SelectedIndex = idx;
-            else
-                ComboNotificationMonitor.SelectedIndex = 0;
         }
 
         #endregion

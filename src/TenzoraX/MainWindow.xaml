@@ -508,14 +508,6 @@
                                 <TextBlock Text="Anzeigedauer:" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
                                 <Slider x:Name="SliderNotificationDuration" Grid.Column="1" Minimum="0.5" Maximum="5" Value="1.5" TickFrequency="0.5" TickPlacement="BottomRight" ValueChanged="SliderNotificationDuration_ValueChanged" Height="20" IsSnapToTickEnabled="True"/>
                             </Grid>
-                            <Grid Margin="16,0,0,2">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="Monitor:" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                <ComboBox x:Name="ComboNotificationMonitor" Grid.Column="1" SelectionChanged="ComboNotificationMonitor_SelectionChanged" Height="22" FontSize="10"/>
-                            </Grid>
                         </StackPanel>
                     </Border>
 

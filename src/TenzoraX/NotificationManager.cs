@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace TenzoraX
@@ -7,9 +8,11 @@ namespace TenzoraX
     public static class NotificationManager
     {
         private static readonly List<NotificationWindow> _activeNotifications = new();
-        private static int _monitorIndex = -1;
         private static bool _enabled = true;
         private static double _duration = 1.5;
+        private static string LogPath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "TenzoraX", "notification.log");
 
         public static bool Enabled
         {
@@ -23,85 +26,72 @@ namespace TenzoraX
             set => _duration = Math.Clamp(value, 0.5, 10.0);
         }
 
-        public static int MonitorIndex
-        {
-            get => _monitorIndex;
-            set => _monitorIndex = value;
-        }
-
         public static void Show(string combo, string action)
         {
             if (!_enabled) return;
+
             try
             {
-                var screen = GetTargetScreen();
-                if (screen == null) return;
+                Log("Show() called: " + combo + " → " + action);
+
+                var primary = GetPrimaryScreen();
+                if (primary == null)
+                {
+                    Log("ERROR: no primary screen found");
+                    return;
+                }
+
+                var workArea = primary.WorkingArea;
+                Log($"Primary monitor working area: {workArea.Width}x{workArea.Height} at ({workArea.Left},{workArea.Top})");
 
                 var notification = new NotificationWindow(combo, action, _duration);
                 notification.Show();
                 notification.Opacity = 0;
 
-                double baseLeft = screen.WorkingArea.Left + 16;
-                double centerY = screen.WorkingArea.Top + screen.WorkingArea.Height / 2;
-                double height = Math.Max(notification.ActualHeight, 60);
+                double notifWidth = notification.ActualWidth;
+                double notifHeight = Math.Max(notification.ActualHeight, 60);
+                Log($"Notification size: {notifWidth}x{notifHeight}");
+
+                double left = workArea.Left + 16;
+                double top = workArea.Top + (workArea.Height - notifHeight) / 2;
 
                 var visible = _activeNotifications.Where(n => n.IsVisible).ToList();
                 double totalStackH = visible.Sum(n => Math.Max(n.ActualHeight, 60) + 8);
-                notification.Top = Math.Max(screen.WorkingArea.Top + 8, centerY - totalStackH - height / 2);
-                notification.Left = baseLeft;
+                top -= totalStackH;
+
+                if (top < workArea.Top + 4)
+                    top = workArea.Top + 4;
+
+                notification.Top = top;
+                notification.Left = left;
+                Log($"Notification position: X={left} Y={top}");
 
                 notification.Closed += (s, e) =>
                 {
                     _activeNotifications.Remove(notification);
-                    try { RepositionAll(); } catch { }
+                    try { RepositionAll(); } catch (Exception ex) { Log("RepositionAll error: " + ex.Message); }
                 };
 
                 _activeNotifications.Add(notification);
+                Log("Starting notification animation");
                 notification.BeginAnimation();
+                Log("Notification animation started successfully");
             }
-            catch
+            catch (Exception ex)
             {
-                // Notification failed silently – hotkey still works
+                Log("Show() ERROR: " + ex.GetType().Name + ": " + ex.Message + "\n" + ex.StackTrace);
             }
         }
 
-        public static string[] GetMonitorNames()
+        private static System.Windows.Forms.Screen? GetPrimaryScreen()
         {
             try
             {
-                var screens = System.Windows.Forms.Screen.AllScreens;
-                var names = new string[screens.Length];
-                for (int i = 0; i < screens.Length; i++)
-                {
-                    var s = screens[i];
-                    string primary = s.Primary ? " (Primary)" : "";
-                    names[i] = $"Monitor {i + 1} – {s.Bounds.Width}×{s.Bounds.Height}{primary}";
-                }
-                return names;
-            }
-            catch
-            {
-                return new[] { "Primary Monitor" };
-            }
-        }
-
-        public static int GetMonitorCount()
-        {
-            try { return System.Windows.Forms.Screen.AllScreens.Length; }
-            catch { return 1; }
-        }
-
-        private static System.Windows.Forms.Screen? GetTargetScreen()
-        {
-            try
-            {
-                var screens = System.Windows.Forms.Screen.AllScreens;
-                if (_monitorIndex >= 0 && _monitorIndex < screens.Length)
-                    return screens[_monitorIndex];
                 return System.Windows.Forms.Screen.PrimaryScreen;
             }
-            catch
+            catch (Exception ex)
             {
+                Log("GetPrimaryScreen() ERROR: " + ex.Message);
                 return null;
             }
         }
@@ -111,18 +101,34 @@ namespace TenzoraX
             var visible = _activeNotifications.Where(n => n.IsVisible).ToList();
             if (visible.Count == 0) return;
 
-            var screen = GetTargetScreen();
-            if (screen == null) return;
+            var primary = GetPrimaryScreen();
+            if (primary == null) return;
 
-            double centerY = screen.WorkingArea.Top + screen.WorkingArea.Height / 2;
+            var workArea = primary.WorkingArea;
             double totalStackH = visible.Sum(n => Math.Max(n.ActualHeight, 60) + 8);
-            double startY = Math.Max(screen.WorkingArea.Top + 8, centerY - totalStackH / 2);
+            double startY = workArea.Top + (workArea.Height - totalStackH) / 2;
+
+            if (startY < workArea.Top + 4)
+                startY = workArea.Top + 4;
 
             foreach (var n in visible)
             {
                 try { n.AnimateTop(startY); } catch { }
                 startY += Math.Max(n.ActualHeight, 60) + 8;
             }
+        }
+
+        private static void Log(string message)
+        {
+            try
+            {
+                string? dir = Path.GetDirectoryName(LogPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+                string entry = $"[{DateTime.Now:HH:mm:ss.fff}] {message}\n";
+                File.AppendAllText(LogPath, entry);
+            }
+            catch { }
         }
     }
 }
