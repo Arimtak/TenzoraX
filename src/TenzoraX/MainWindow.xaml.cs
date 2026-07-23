@@ -159,44 +159,52 @@ namespace TenzoraX
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            IntPtr hwnd = new WindowInteropHelper(this).Handle;
-            int useImmersiveDarkMode = 1;
-            DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useImmersiveDarkMode, sizeof(int));
-
-            Icon = CreateControllerIconSource();
-            InitializeGamepadButtonMap();
-            LoadSettings();
-            TxtVersionHeader.Text = $"v{AppVersion.Current}";
-
-            // Cleanup: remove any leftover .old.exe from old update versions
-            string oldExe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TenzoraX.old.exe");
-            if (File.Exists(oldExe)) try { File.Delete(oldExe); } catch { }
-            string oldExe2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TenzoraX.exe.bak");
-            if (File.Exists(oldExe2)) try { File.Delete(oldExe2); } catch { }
-
-            // Auto-elevate if setting is enabled (silent – no dialog)
-            if (_settings.RunAsAdministrator && !InputSimulator.IsRunningAsAdmin())
+            try
             {
-                try
-                {
-                    var cmdArgs = Environment.GetCommandLineArgs();
-                    var argStr = cmdArgs.Length > 1
-                        ? string.Join(" ", cmdArgs.Skip(1).Select(a => a.Contains(' ') ? $"\"{a}\"" : a))
-                        : "";
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = Environment.ProcessPath,
-                        UseShellExecute = true,
-                        Verb = "runas",
-                        Arguments = argStr
-                    };
-                    Process.Start(psi);
-                }
-                catch { }
-                Environment.Exit(0);
-            }
+                IntPtr hwnd = new WindowInteropHelper(this).Handle;
+                int useImmersiveDarkMode = 1;
+                DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useImmersiveDarkMode, sizeof(int));
 
-            InitLanguage();
+                Icon = CreateControllerIconSource();
+                InitializeGamepadButtonMap();
+                LoadSettings();
+
+                // Auto-elevate: only if setting is on AND we're not already admin
+                if (_settings.RunAsAdministrator && !InputSimulator.IsRunningAsAdmin())
+                {
+                    try
+                    {
+                        var cmdArgs = Environment.GetCommandLineArgs();
+                        var argStr = cmdArgs.Length > 1
+                            ? string.Join(" ", cmdArgs.Skip(1).Select(a => a.Contains(' ') ? $"\"{a}\"" : a))
+                            : "";
+                        var psi = new ProcessStartInfo
+                        {
+                            FileName = Environment.ProcessPath,
+                            UseShellExecute = true,
+                            Verb = "runas",
+                            Arguments = argStr
+                        };
+                        Process.Start(psi);
+                        Environment.Exit(0);
+                        return;
+                    }
+                    catch
+                    {
+                        _settings.RunAsAdministrator = false;
+                        SaveSettings();
+                    }
+                }
+
+                TxtVersionHeader.Text = $"v{AppVersion.Current}";
+
+                // Cleanup: remove any leftover .old.exe from old update versions
+                string oldExe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TenzoraX.old.exe");
+                if (File.Exists(oldExe)) try { File.Delete(oldExe); } catch { }
+                string oldExe2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TenzoraX.exe.bak");
+                if (File.Exists(oldExe2)) try { File.Delete(oldExe2); } catch { }
+
+                InitLanguage();
             DataContext = LanguageManager.Instance;
             LoadButtonPositions();
             UpdateButtonsAppearance();
@@ -281,6 +289,16 @@ namespace TenzoraX
             if (_settings.StartMinimized || args.Contains("--minimized"))
             {
                 HideToTray(false);
+            }
+            }
+            catch (Exception ex)
+            {
+                try { LogCrash("Startup", ex); } catch { }
+                System.Windows.MessageBox.Show(
+                    $"TenzoraX konnte nicht gestartet werden.\n\n{ex.GetType().Name}: {ex.Message}\n\nDetails: crash.log",
+                    "Startfehler",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
             }
         }
 
