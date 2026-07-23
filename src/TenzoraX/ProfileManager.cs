@@ -164,8 +164,13 @@ namespace TenzoraX
                             SoundManager.PlayConfirmation();
                         });
                         // Show notification on UI thread
-                        System.Windows.Application.Current.Dispatcher.Invoke(() =>
-                            NotificationManager.Show(combo, action));
+                        try
+                        {
+                            var app = System.Windows.Application.Current;
+                            app?.Dispatcher.Invoke(() =>
+                                NotificationManager.Show(combo, action));
+                        }
+                        catch { }
                     }
                 }
                 else
