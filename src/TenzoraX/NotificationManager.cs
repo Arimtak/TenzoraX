@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 
 namespace TenzoraX
@@ -13,9 +12,6 @@ namespace TenzoraX
         private static double _savedWidth = 360;
         private static double _savedPosX = -1;
         private static double _savedPosY = -1;
-        private static string LogPath => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-            "TenzoraX", "notification.log");
 
         public static bool Enabled
         {
@@ -53,17 +49,14 @@ namespace TenzoraX
 
             try
             {
-                Log("Show() called: " + combo + " → " + action);
-
                 var primary = GetPrimaryScreen();
                 if (primary == null)
                 {
-                    Log("ERROR: no primary screen found");
+                    App.LogApp("Notification: kein primärer Bildschirm gefunden");
                     return;
                 }
 
                 var workArea = primary.WorkingArea;
-                Log($"Primary working area: {workArea.Width}x{workArea.Height} at ({workArea.Left},{workArea.Top})");
 
                 double notifWidth = Math.Clamp(_savedWidth, 250, workArea.Width - 40);
                 var notification = new NotificationWindow(combo, action, _duration, notifWidth);
@@ -71,7 +64,6 @@ namespace TenzoraX
                 notification.Opacity = 0;
 
                 double notifHeight = Math.Max(notification.ActualHeight, 70);
-                Log($"Notification size: {notifWidth}x{notifHeight}");
 
                 double left, top;
 
@@ -80,13 +72,11 @@ namespace TenzoraX
                 {
                     left = _savedPosX;
                     top = _savedPosY;
-                    Log("Using saved position");
                 }
                 else
                 {
                     left = workArea.Left + 16;
                     top = workArea.Top + (workArea.Height - notifHeight) / 2;
-                    Log("Using default center-left position");
                 }
 
                 var visible = _activeNotifications.Where(n => n.IsVisible).ToList();
@@ -96,25 +86,21 @@ namespace TenzoraX
 
                 notification.Top = top;
                 notification.Left = left;
-                Log($"Final position: X={left} Y={top}");
 
                 notification.Closed += (s, e) =>
                 {
                     _activeNotifications.Remove(notification);
                     _savedPosX = notification.Left;
                     _savedPosY = notification.Top;
-                    Log($"Position saved: X={_savedPosX} Y={_savedPosY}");
-                    try { RepositionAll(); } catch (Exception ex) { Log("RepositionAll error: " + ex.Message); }
+                    try { RepositionAll(); } catch { }
                 };
 
                 _activeNotifications.Add(notification);
-                Log("Starting animation");
                 notification.BeginAnimation();
-                Log("Animation started");
             }
             catch (Exception ex)
             {
-                Log("Show() ERROR: " + ex.GetType().Name + ": " + ex.Message + "\n" + ex.StackTrace);
+                App.LogApp("Notification-Fehler: " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
@@ -123,7 +109,7 @@ namespace TenzoraX
             try { return System.Windows.Forms.Screen.PrimaryScreen; }
             catch (Exception ex)
             {
-                Log("GetPrimaryScreen() ERROR: " + ex.Message);
+                App.LogApp("GetPrimaryScreen-Fehler: " + ex.Message);
                 return null;
             }
         }
@@ -146,19 +132,6 @@ namespace TenzoraX
                 try { n.AnimateTop(startY); } catch { }
                 startY += Math.Max(n.ActualHeight, 70) + 8;
             }
-        }
-
-        private static void Log(string message)
-        {
-            try
-            {
-                string? dir = Path.GetDirectoryName(LogPath);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                    Directory.CreateDirectory(dir);
-                string entry = $"[{DateTime.Now:HH:mm:ss.fff}] {message}\n";
-                File.AppendAllText(LogPath, entry);
-            }
-            catch { }
         }
     }
 }

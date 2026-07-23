@@ -1,17 +1,83 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 
 namespace TenzoraX
 {
+    public class MappingPart
+    {
+        public string Text { get; set; } = "";
+        public bool IsButton { get; set; }
+    }
+
     public class Mapping
     {
+        private static readonly Dictionary<string, string> _symbolMap = new()
+        {
+            { "DPAD_UP", "↑" },
+            { "DPAD_DOWN", "↓" },
+            { "DPAD_LEFT", "←" },
+            { "DPAD_RIGHT", "→" },
+            { "A", "A" },
+            { "B", "B" },
+            { "X", "X" },
+            { "Y", "Y" },
+            { "L1", "LB" },
+            { "R1", "RB" },
+            { "L2", "LT" },
+            { "R2", "RT" },
+            { "L3", "L3" },
+            { "R3", "R3" },
+            { "SELECT", "⏵" },
+            { "START", "⏭" },
+            { "LS_UP", "L-Stick ↑" },
+            { "LS_DOWN", "L-Stick ↓" },
+            { "LS_LEFT", "L-Stick ←" },
+            { "LS_RIGHT", "L-Stick →" },
+            { "RS_UP", "R-Stick ↑" },
+            { "RS_DOWN", "R-Stick ↓" },
+            { "RS_LEFT", "R-Stick ←" },
+            { "RS_RIGHT", "R-Stick →" },
+        };
+
         public List<string> Combo { get; set; } = new();
         public List<string> Action { get; set; } = new();
 
-        public string DisplayCombo => string.Join(" + ", Combo);
+        public string DisplayCombo => string.Join(" + ", Combo.Select(b => _symbolMap.TryGetValue(b, out var s) ? s : b));
         public string DisplayAction => string.Join(" + ", Action);
+
+        public List<MappingPart> ComboParts
+        {
+            get
+            {
+                var list = new List<MappingPart>();
+                for (int i = 0; i < Combo.Count; i++)
+                {
+                    if (i > 0)
+                        list.Add(new MappingPart { Text = "+", IsButton = false });
+                    string symbol = _symbolMap.TryGetValue(Combo[i], out var s) ? s : Combo[i];
+                    list.Add(new MappingPart { Text = symbol, IsButton = true });
+                }
+                return list;
+            }
+        }
+
+        public List<MappingPart> ActionParts
+        {
+            get
+            {
+                var list = new List<MappingPart>();
+                for (int i = 0; i < Action.Count; i++)
+                {
+                    if (i > 0)
+                        list.Add(new MappingPart { Text = "+", IsButton = false });
+                    list.Add(new MappingPart { Text = Action[i], IsButton = true });
+                }
+                return list;
+            }
+        }
     }
 
     public class MappingProfile
@@ -160,17 +226,30 @@ namespace TenzoraX
                         // Trigger key down in background thread
                         Task.Run(() =>
                         {
-                            InputSimulator.SimulateKeyDown(mapping.Action);
-                            SoundManager.PlayConfirmation();
+                            try
+                            {
+                                InputSimulator.SimulateKeyDown(mapping.Action);
+                                SoundManager.PlayConfirmation();
+                            }
+                            catch (Exception ex)
+                            {
+                                App.LogApp("Hotkey-Ausgabe-Fehler: " + ex.Message);
+                            }
                         });
                         // Show notification on UI thread
                         try
                         {
                             var app = System.Windows.Application.Current;
-                            app?.Dispatcher.Invoke(() =>
-                                NotificationManager.Show(combo, action));
+                            if (app != null)
+                            {
+                                app.Dispatcher.Invoke(() =>
+                                    NotificationManager.Show(combo, action));
+                            }
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            App.LogApp("Notification-Fehler: " + ex.Message);
+                        }
                     }
                 }
                 else
@@ -179,7 +258,17 @@ namespace TenzoraX
                     {
                         _triggeredMappings.Remove(mapping);
                         // Trigger key up in background thread
-                        Task.Run(() => InputSimulator.SimulateKeyUp(mapping.Action));
+                        Task.Run(() =>
+                        {
+                            try
+                            {
+                                InputSimulator.SimulateKeyUp(mapping.Action);
+                            }
+                            catch (Exception ex)
+                            {
+                                App.LogApp("Hotkey-Release-Fehler: " + ex.Message);
+                            }
+                        });
                     }
                 }
             }

@@ -1,0 +1,121 @@
+<Window x:Class="TenzoraX.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:TenzoraX"
+        Title="⚙ Einstellungen" Height="600" Width="520"
+        Background="{StaticResource BgBrush}" Foreground="{StaticResource TextBrush}"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        ShowInTaskbar="False" FontFamily="Segoe UI"
+        WindowStyle="SingleBorderWindow">
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Title -->
+        <TextBlock Grid.Row="0" Text="⚙ Einstellungen" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF" Margin="0,0,0,16"/>
+
+        <!-- Scrollable settings -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+
+                <!-- BATTERY -->
+                <Border Background="#0D0D12" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="14" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="🔋 BATTERIE" FontWeight="Bold" FontSize="12" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,10"/>
+
+                        <CheckBox x:Name="ChkBatteryEnable" Content="Batterieanzeige aktivieren" Checked="ChkBatteryEnable_Changed" Unchecked="ChkBatteryEnable_Changed" FontWeight="SemiBold" Foreground="White"/>
+                        <TextBlock Text="Zeigt den geschätzten Controller-Akkustand in TenzoraX an." FontSize="10" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="24,2,0,10"/>
+
+                        <Grid Margin="0,0,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Akkukapazität:" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <Border Grid.Column="1" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="3" Width="52" Height="24" Padding="0">
+                                <TextBox x:Name="TxtBatteryHours" Text="15" FontSize="12" TextAlignment="Center" VerticalContentAlignment="Center" Padding="0" BorderThickness="0" Background="Transparent" Foreground="White" LostFocus="TxtBatteryHours_LostFocus" KeyDown="TxtBatteryHours_KeyDown"/>
+                            </Border>
+                            <TextBlock Grid.Column="2" Text="Stunden" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="5,0,6,0"/>
+                            <Button x:Name="BtnConfirmBattery" Grid.Column="3" Content="✓" Click="BtnConfirmBattery_Click" Width="24" Height="24" Padding="0" FontSize="11" FontWeight="Bold" Foreground="#10B981" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"/>
+                        </Grid>
+                        <TextBlock x:Name="TxtBatteryCalculated" Text="{Binding Battery_Calculated}" FontSize="9" Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,4"/>
+                        <TextBlock Text="Legt die Gesamtkapazität des Controller-Akkus fest. Nach Bestätigung wird der Akku auf 100 % zurückgesetzt." FontSize="10" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="24,0,0,10"/>
+
+                        <CheckBox x:Name="ChkBatteryTray" Content="Batteriestatus in Taskleiste anzeigen" Checked="ChkBatteryTray_Changed" Unchecked="ChkBatteryTray_Changed" FontSize="10" Foreground="White" Margin="0,0,0,2"/>
+                        <TextBlock Text="Zeigt den aktuellen Akkustand als Symbol im Infobereich der Taskleiste an." FontSize="10" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="24,2,0,8"/>
+
+                        <CheckBox x:Name="ChkBatteryAnimation" Content="Akku-Ladeanimation anzeigen" Checked="ChkBatteryAnimation_Changed" Unchecked="ChkBatteryAnimation_Changed" FontSize="10" Foreground="White" Margin="0,0,0,2"/>
+                        <TextBlock Text="Zeigt eine optische Ladeanimation im Taskleistensymbol an, während der Controller aktiv genutzt wird." FontSize="10" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="24,2,0,10"/>
+
+                        <Button x:Name="BtnResetBattery" Content="Auf Standardwerte zurücksetzen" Click="BtnResetBattery_Click" Height="26" Padding="10,1" FontSize="10" Foreground="#F59E0B" Background="#1E1E28" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- HOTKEY-NOTIFICATION -->
+                <Border Background="#0D0D12" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="14" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="🔔 HOTKEY-BENACHRICHTIGUNGEN" FontWeight="Bold" FontSize="12" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,10"/>
+
+                        <CheckBox x:Name="ChkNotification" Content="Benachrichtigungen anzeigen" Checked="ChkNotification_Changed" Unchecked="ChkNotification_Changed" FontWeight="SemiBold" Foreground="White"/>
+                        <TextBlock Text="Zeigt eine visuelle Benachrichtigung auf dem Bildschirm an, wenn eine gespeicherte Controller-Kombination ausgelöst wird." FontSize="10" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="24,2,0,10"/>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Anzeigedauer:" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <Slider x:Name="SliderNotificationDuration" Grid.Column="1" Minimum="0.5" Maximum="10" Value="5.0" TickFrequency="0.5" TickPlacement="BottomRight" ValueChanged="SliderNotificationDuration_ValueChanged" Height="22" IsSnapToTickEnabled="True"/>
+                        </Grid>
+                        <TextBlock Text="Legt fest, wie lange die Benachrichtigung auf dem Bildschirm sichtbar bleibt." FontSize="10" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="24,2,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- SOUNDFEEDBACK -->
+                <Border Background="#0D0D12" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="14" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="🔊 SOUNDFEEDBACK" FontWeight="Bold" FontSize="12" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,10"/>
+
+                        <CheckBox x:Name="ChkSound" Content="Soundfeedback aktivieren" Checked="ChkSound_Changed" Unchecked="ChkSound_Changed" FontWeight="SemiBold" Foreground="White"/>
+                        <TextBlock Text="Spielt einen kurzen Bestätigungston ab, wenn eine gespeicherte Hotkey-Kombination erfolgreich ausgeführt wurde." FontSize="10" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="24,2,0,10"/>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Lautstärke:" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <Slider x:Name="SliderSoundVolume" Grid.Column="1" Minimum="0" Maximum="100" Value="50" TickFrequency="10" TickPlacement="None" ValueChanged="SliderSoundVolume_ValueChanged" Height="22"/>
+                        </Grid>
+                        <TextBlock Text="Legt die Lautstärke des Soundfeedbacks fest." FontSize="10" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="24,2,0,0"/>
+                    </StackPanel>
+                </Border>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Bottom: Version + Update -->
+        <Border Grid.Row="2" Background="#0D0D12" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="14" Margin="0,12,0,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="TenzoraX" FontSize="13" FontWeight="Bold" Foreground="#FFFFFF"/>
+                    <TextBlock x:Name="TxtSettingsVersion" FontSize="10" Foreground="{StaticResource MutedTextBrush}"/>
+                </StackPanel>
+                <Button Grid.Column="1" x:Name="BtnCheckUpdate" Content="Nach Updates suchen" Click="BtnCheckUpdate_Click" Height="30" Padding="12,0" FontSize="10" Foreground="{StaticResource AccentBrush}" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" Margin="0,0,8,0"/>
+                <Button Grid.Column="2" Content="Schließen" Click="BtnClose_Click" Height="30" Padding="12,0" FontSize="10" Foreground="White" Background="#1E1E28" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
+            </Grid>
+        </Border>
+
+    </Grid>
+</Window>

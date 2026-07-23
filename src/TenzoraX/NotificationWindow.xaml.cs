@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
@@ -13,9 +12,6 @@ namespace TenzoraX
         private readonly double _duration;
         private bool _isDragging;
         private System.Windows.Point _dragStart;
-        private static string LogPath => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-            "TenzoraX", "notification.log");
 
         public NotificationWindow(string combo, string action, double duration, double width)
         {
@@ -24,11 +20,10 @@ namespace TenzoraX
                 InitializeComponent();
                 Width = width;
                 ProgressBar.Width = width - 40;
-                Log("NotificationWindow created, width=" + width);
             }
             catch (Exception ex)
             {
-                Log("NotificationWindow init ERROR: " + ex.Message);
+                App.LogApp("NotificationWindow init ERROR: " + ex.Message);
             }
 
             TxtCombo.Text = combo;
@@ -38,6 +33,24 @@ namespace TenzoraX
             MouseDown += OnMouseDown;
             MouseMove += OnMouseMove;
             MouseUp += OnMouseUp;
+            Closed += OnClosed;
+        }
+
+        private void OnClosed(object? sender, EventArgs e)
+        {
+            // Stop all animations
+            try
+            {
+                SlideTransform.BeginAnimation(TranslateTransform.XProperty, null);
+                BeginAnimation(OpacityProperty, null);
+                ProgressBar.BeginAnimation(FrameworkElement.WidthProperty, null);
+            }
+            catch { }
+            // Unregister events
+            MouseDown -= OnMouseDown;
+            MouseMove -= OnMouseMove;
+            MouseUp -= OnMouseUp;
+            Closed -= OnClosed;
         }
 
         private void OnMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -47,7 +60,6 @@ namespace TenzoraX
                 _isDragging = true;
                 _dragStart = new System.Windows.Point(Left, Top);
                 CaptureMouse();
-                Log("Drag started");
             }
         }
 
@@ -67,7 +79,6 @@ namespace TenzoraX
             {
                 _isDragging = false;
                 ReleaseMouseCapture();
-                Log($"Drag ended: X={Left} Y={Top}");
             }
         }
 
@@ -75,13 +86,9 @@ namespace TenzoraX
         {
             try
             {
-                Log("BeginAnimation started, duration=" + _duration);
-
                 double barWidth = ProgressBar.Width;
 
                 // ===== PHASE 1: Slide In (0.8s) =====
-                Log("Phase 1: Slide in");
-
                 var slideIn = new DoubleAnimation(-360, 0, TimeSpan.FromMilliseconds(800));
                 slideIn.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
                 SlideTransform.BeginAnimation(TranslateTransform.XProperty, slideIn);
@@ -89,41 +96,36 @@ namespace TenzoraX
                 var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(300));
                 BeginAnimation(OpacityProperty, fadeIn);
 
-                await Task.Delay(800);
+                await Task.Delay(800).ConfigureAwait(true);
+                if (!IsLoaded) return;
 
                 // ===== PHASE 2: Visible / Wait (_duration seconds) =====
-                Log("Phase 2: Waiting " + _duration + "s");
-
                 var progress = new DoubleAnimation(barWidth, 0, TimeSpan.FromSeconds(_duration));
                 ProgressBar.BeginAnimation(FrameworkElement.WidthProperty, progress);
 
-                await Task.Delay((int)(_duration * 1000));
+                await Task.Delay((int)(_duration * 1000)).ConfigureAwait(true);
+                if (!IsLoaded) return;
 
                 // ===== PHASE 3: Slide Out (0.9s) =====
-                Log("Phase 3: Slide out");
-
                 var slideOut = new DoubleAnimation(0, -360, TimeSpan.FromMilliseconds(900));
                 slideOut.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn };
                 SlideTransform.BeginAnimation(TranslateTransform.XProperty, slideOut);
 
                 var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(900));
-                fadeOut.Completed += (s, e) =>
+                fadeOut.Completed += (s, args) =>
                 {
                     try
                     {
                         BeginAnimation(OpacityProperty, null);
-                        Log("Closing notification");
                         Close();
                     }
-                    catch (Exception ex) { Log("Close error: " + ex.Message); }
+                    catch { }
                 };
                 BeginAnimation(OpacityProperty, fadeOut);
-
-                Log("BeginAnimation phases complete");
             }
             catch (Exception ex)
             {
-                Log("BeginAnimation ERROR: " + ex.GetType().Name + ": " + ex.Message);
+                App.LogApp("Notification Animation-Fehler: " + ex.Message);
                 try { Close(); } catch { }
             }
         }
@@ -135,19 +137,6 @@ namespace TenzoraX
                 var anim = new DoubleAnimation(targetY, TimeSpan.FromMilliseconds(300));
                 anim.EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut };
                 BeginAnimation(TopProperty, anim);
-            }
-            catch (Exception ex) { Log("AnimateTop error: " + ex.Message); }
-        }
-
-        private static void Log(string message)
-        {
-            try
-            {
-                string? dir = Path.GetDirectoryName(LogPath);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                    Directory.CreateDirectory(dir);
-                string entry = $"[{DateTime.Now:HH:mm:ss.fff}] {message}\n";
-                File.AppendAllText(LogPath, entry);
             }
             catch { }
         }

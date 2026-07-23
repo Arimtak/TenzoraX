@@ -250,9 +250,16 @@ namespace TenzoraX
                 Name = "TenzoraX-Poll"
             };
             _pollThread.Start();
+            App.LogApp("Controller-System gestartet");
         }
 
-        public void Shutdown() => _isRunning = false;
+        public void Shutdown()
+        {
+            _isRunning = false;
+            _pollThread = null;
+            lock (_controllers) { _controllers.Clear(); }
+            App.LogApp("Controller-System gestoppt");
+        }
 
         // ============================================================
         //  POLLING LOOP (EVERY 15ms = ~66Hz)
@@ -261,6 +268,7 @@ namespace TenzoraX
         private void PollLoop()
         {
             int scanTimer = 0;
+            int errorCount = 0;
 
             while (_isRunning)
             {
@@ -320,8 +328,24 @@ namespace TenzoraX
                             catch { }
                         }
                     }
+
+                    errorCount = 0;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    errorCount++;
+                    App.LogApp("Controller-Fehler (#" + errorCount + "): " + ex.Message);
+                    if (errorCount > 10)
+                    {
+                        App.LogApp("Controller: zu viele Fehler, versuche ReInit");
+                        try
+                        {
+                            lock (_controllers) { _controllers.Clear(); }
+                        }
+                        catch { }
+                        errorCount = 0;
+                    }
+                }
 
                 Thread.Sleep(15);
             }
@@ -426,6 +450,7 @@ namespace TenzoraX
             // Notify on change
             if (oldCount != newCount)
             {
+                App.LogApp("Controller-Änderung: " + oldCount + " → " + newCount + " Geräte");
                 try { GamepadsChanged?.Invoke(this, EventArgs.Empty); } catch { }
             }
         }
@@ -437,7 +462,34 @@ namespace TenzoraX
         private void ReadXInput(ControllerInfo ctrl)
         {
             var rc = XInputGetState((uint)ctrl.SlotIndex, out var state);
-            if (rc != ERROR_SUCCESS) return;
+            if (rc != ERROR_SUCCESS)
+            {
+                if (ctrl.Connected)
+                {
+                    ctrl.Connected = false;
+                    App.LogApp("XInput-Controller getrennt: Slot " + ctrl.SlotIndex);
+                    try
+                    {
+                        StateChanged?.Invoke(this, new ControllerStateEventArgs
+                        {
+                            ControllerName = "None",
+                            ConnectionType = "N/A",
+                            BatteryInfo = "N/A",
+                            PressedButtons = new List<string>()
+                        });
+                        GamepadsChanged?.Invoke(this, EventArgs.Empty);
+                    }
+                    catch { }
+                }
+                return;
+            }
+
+            if (!ctrl.Connected)
+            {
+                ctrl.Connected = true;
+                App.LogApp("XInput-Controller verbunden: Slot " + ctrl.SlotIndex);
+                try { GamepadsChanged?.Invoke(this, EventArgs.Empty); } catch { }
+            }
 
             var g = state.Gamepad;
             var w = g.wButtons;
@@ -506,7 +558,10 @@ namespace TenzoraX
                     RightStickX = rx, RightStickY = ry
                 });
             }
-            catch { }
+            catch (Exception ex)
+            {
+                App.LogApp("Controller StateChanged-Fehler: " + ex.Message);
+            }
         }
 
         // ============================================================
@@ -522,7 +577,34 @@ namespace TenzoraX
                 joyInfo.dwFlags = JOY_RETURNALL | JOY_RETURNPOVCTS;
 
                 int rc = joyGetPosEx((uint)ctrl.SlotIndex, out joyInfo);
-                if (rc != JOYERR_NOERROR) return;
+                if (rc != JOYERR_NOERROR)
+                {
+                    if (ctrl.Connected)
+                    {
+                        ctrl.Connected = false;
+                        App.LogApp("WinMM-Controller getrennt: Slot " + ctrl.SlotIndex);
+                        try
+                        {
+                            StateChanged?.Invoke(this, new ControllerStateEventArgs
+                            {
+                                ControllerName = "None",
+                                ConnectionType = "N/A",
+                                BatteryInfo = "N/A",
+                                PressedButtons = new List<string>()
+                            });
+                            GamepadsChanged?.Invoke(this, EventArgs.Empty);
+                        }
+                        catch { }
+                    }
+                    return;
+                }
+
+                if (!ctrl.Connected)
+                {
+                    ctrl.Connected = true;
+                    App.LogApp("WinMM-Controller verbunden: Slot " + ctrl.SlotIndex);
+                    try { GamepadsChanged?.Invoke(this, EventArgs.Empty); } catch { }
+                }
 
                 var pressed = new List<string>();
                 uint b = joyInfo.dwButtons;
@@ -600,7 +682,10 @@ namespace TenzoraX
                         RightStickX = rx, RightStickY = ry
                     });
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    App.LogApp("Controller WinMM StateChanged-Fehler: " + ex.Message);
+                }
             }
             catch { }
         }

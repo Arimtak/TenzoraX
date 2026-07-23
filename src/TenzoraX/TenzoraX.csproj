@@ -21,6 +21,9 @@
     <Resource Include="..\..\assets\icons\**">
       <Link>assets\icons\%(RecursiveDir)%(FileName)%(Extension)</Link>
     </Resource>
+    <Resource Include="..\..\assets\battery\**">
+      <Link>assets\battery\%(RecursiveDir)%(FileName)%(Extension)</Link>
+    </Resource>
   </ItemGroup>
 
 </Project>

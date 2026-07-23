@@ -25,11 +25,12 @@ namespace TenzoraX
             byte[]? wav = GetPresetWav(Preset);
             if (wav == null) return;
 
+            double vol = Math.Clamp(Volume, 0.0, 1.0);
             Task.Run(() =>
             {
                 try
                 {
-                    byte[] volAdjusted = AdjustVolume(wav, Volume);
+                    byte[] volAdjusted = AdjustVolume(wav, vol);
                     using var ms = new MemoryStream(volAdjusted);
                     using var player = new SoundPlayer(ms);
                     player.PlaySync();

@@ -27,7 +27,6 @@ namespace TenzoraX
         public bool StartMinimized { get; set; } = false;
         public bool MinimizeToTray { get; set; } = false;
         public string LastActiveProfile { get; set; } = "Default";
-        public bool IsPaused { get; set; } = false;
         public Dictionary<string, double> ButtonPositions { get; set; } = new();
         public Dictionary<string, double> RelativeButtonPositions { get; set; } = new();
         public bool EditMode { get; set; } = false;
@@ -76,7 +75,10 @@ namespace TenzoraX
         public double BatteryActiveMinutes { get; set; } = 0;
         public bool BatteryTrayEnabled { get; set; } = true;
         public bool BatteryAnimationEnabled { get; set; } = true;
-        public bool BatterySettingsCollapsed { get; set; } = false;
+        public double WindowWidth { get; set; } = 1180;
+        public double WindowHeight { get; set; } = 720;
+        public double WindowLeft { get; set; } = double.NaN;
+        public double WindowTop { get; set; } = double.NaN;
         public string OutputMode { get; set; } = "VK";
         public bool SoundEnabled { get; set; } = true;
         public double SoundVolume { get; set; } = 0.5;
@@ -129,11 +131,6 @@ namespace TenzoraX
         private bool _batteryWasActiveLastTick = false;
         private const double BatteryActiveTimeoutSeconds = 5;
         private int _batteryLastIconPercent = -1;
-        private bool _batterySettingsCollapsed
-        {
-            get => _settings.BatterySettingsCollapsed;
-            set => _settings.BatterySettingsCollapsed = value;
-        }
 
         public MainWindow()
         {
@@ -171,6 +168,24 @@ namespace TenzoraX
                 Icon = CreateControllerIconSource();
                 InitializeGamepadButtonMap();
                 LoadSettings();
+
+                App.LogApp("Konfiguration geladen");
+
+                // Restore window size/position
+                if (_settings.WindowWidth > 0 && _settings.WindowHeight > 0)
+                {
+                    Width = _settings.WindowWidth;
+                    Height = _settings.WindowHeight;
+                }
+                if (!double.IsNaN(_settings.WindowLeft) && !double.IsNaN(_settings.WindowTop))
+                {
+                    var screen = System.Windows.Forms.Screen.FromPoint(new System.Drawing.Point((int)_settings.WindowLeft, (int)_settings.WindowTop));
+                    if (screen != null && screen.WorkingArea.Contains(new System.Drawing.Rectangle((int)_settings.WindowLeft, (int)_settings.WindowTop, (int)_settings.WindowWidth, (int)_settings.WindowHeight)))
+                    {
+                        Left = _settings.WindowLeft;
+                        Top = _settings.WindowTop;
+                    }
+                }
 
                 // Auto-elevate: only if setting is on AND we're not already admin
                 if (_settings.RunAsAdministrator && !InputSimulator.IsRunningAsAdmin())
@@ -220,6 +235,7 @@ namespace TenzoraX
             ControllerManager.Instance.StateChanged += OnControllerStateChanged;
             ControllerManager.Instance.Initialize();
             RefreshGamepadsList();
+            App.LogApp("Controller-System initialisiert");
 
             RefreshProfilesList();
             SelectProfile(_settings.LastActiveProfile);
@@ -232,7 +248,6 @@ namespace TenzoraX
                 else
                     RadioEditImage.IsChecked = true;
             }
-            ChkPause.IsChecked = _settings.IsPaused;
             ChkAutostart.IsChecked = _settings.AutostartEnabled;
             ChkStartMinimized.IsChecked = _settings.StartMinimized;
             ChkMinimizeToTray.IsChecked = _settings.MinimizeToTray;
@@ -246,33 +261,18 @@ namespace TenzoraX
             // Admin mode
             UpdateAdminUI();
 
-            // Sound feedback
-            ChkSound.IsChecked = _settings.SoundEnabled;
+            // Initialize manager state from settings (UI controls are in SettingsWindow)
             SoundManager.Enabled = _settings.SoundEnabled;
-            SliderSoundVolume.Value = _settings.SoundVolume * 100;
             SoundManager.Volume = _settings.SoundVolume;
-
-            // Notification settings
-            ChkNotification.IsChecked = _settings.HotkeyNotificationsEnabled;
             NotificationManager.Enabled = _settings.HotkeyNotificationsEnabled;
             NotificationManager.Duration = _settings.NotificationDuration;
             NotificationManager.NotificationWidth = _settings.NotificationWidth;
             NotificationManager.SavedPosX = _settings.NotificationPositionX;
             NotificationManager.SavedPosY = _settings.NotificationPositionY;
-            SliderNotificationDuration.Value = _settings.NotificationDuration;
 
             // Battery UI initialization
-            ChkBatteryEnable.IsChecked = _settings.BatteryEnabled;
-            PanelBatterySettings.Visibility = _settings.BatteryEnabled && !_batterySettingsCollapsed ? Visibility.Visible : Visibility.Collapsed;
-            BtnToggleBattery.Content = _batterySettingsCollapsed ? "▼" : "▲";
-            TxtBatterySummary.Visibility = _settings.BatteryEnabled && _batterySettingsCollapsed ? Visibility.Visible : Visibility.Collapsed;
-            TxtBatteryHours.Text = _settings.BatteryHours.ToString("0.#");
-            UpdateBatteryCalculatedLabel();
-            ChkBatteryTray.IsChecked = _settings.BatteryTrayEnabled;
-            ChkBatteryAnimation.IsChecked = _settings.BatteryAnimationEnabled;
             InitBatteryTimer();
             ApplyBatteryToTray();
-            UpdateBatterySummary();
 
             // Final position reapply & centering after layout is complete
             Dispatcher.BeginInvoke(new Action(() =>
@@ -298,6 +298,12 @@ namespace TenzoraX
 
             _settingsLoaded = true;
             SaveSettings();
+
+            // Notify user if previous session crashed
+            if (App.HasCrashLog)
+            {
+                try { ShowCrashDialog(); App.DeleteCrashLog(); } catch { }
+            }
             }
             catch (Exception ex)
             {
@@ -768,7 +774,7 @@ namespace TenzoraX
 
         private void OnGamepadsChanged(object? sender, EventArgs e)
         {
-            Dispatcher.Invoke(RefreshGamepadsList);
+            Dispatcher.BeginInvoke(RefreshGamepadsList);
         }
 
         private void RefreshGamepadsList()
@@ -801,7 +807,7 @@ namespace TenzoraX
 
         private void OnControllerStateChanged(object? sender, ControllerStateEventArgs e)
         {
-            Dispatcher.Invoke(() =>
+            Dispatcher.BeginInvoke(() =>
             {
                 // Track battery input time
                 if (_settings.BatteryEnabled && e.ControllerName != "None" && e.PressedButtons.Count > 0)
@@ -819,23 +825,9 @@ namespace TenzoraX
                     TxtStatus.Foreground = System.Windows.Media.Brushes.LightGreen;
                 }
 
-                // Batterie-Status immer aktualisieren (auch im Pause-Modus)
+                // Batterie-Status immer aktualisieren
                 TxtBattery.Text = e.BatteryInfo;
                 UpdateBatteryBar(e.BatteryInfo);
-
-                // Wenn pausiert, keine Button-Farben und keine Eingaben verarbeiten
-                if (_settings.IsPaused)
-                {
-                    // Trotzdem die Stick-Positionen aktualisieren für visuelles Feedback
-                    Canvas.SetLeft(Btn_L3, 12 + (e.LeftStickX * 12));
-                    Canvas.SetTop(Btn_L3, 12 + (e.LeftStickY * -12));
-                    Canvas.SetLeft(Btn_R3, 12 + (e.RightStickX * 12));
-                    Canvas.SetTop(Btn_R3, 12 + (e.RightStickY * -12));
-                    
-                    // Gespeicherte Mappings funktionieren immer
-                    ProfileManager.Instance.ProcessControllerInput(e.PressedButtons);
-                    return;
-                }
 
                 foreach (var pair in _gamepadButtonsUi)
                 {
@@ -898,7 +890,6 @@ namespace TenzoraX
                 Canvas.SetTop(Btn_R3, 12 + (e.RightStickY * -12));
             }
 
-                // Gespeicherte Mappings funktionieren immer (auch im Pause-Modus)
                 ProfileManager.Instance.ProcessControllerInput(e.PressedButtons);
             });
         }
@@ -962,7 +953,7 @@ namespace TenzoraX
 
         private void BatteryTimer_Tick(object? sender, EventArgs e)
         {
-            if (!_settings.BatteryEnabled || _settings.IsPaused) return;
+            if (!_settings.BatteryEnabled) return;
 
             bool isActive = (DateTime.UtcNow - _lastBatteryInputTime).TotalSeconds < BatteryActiveTimeoutSeconds;
 
@@ -974,7 +965,6 @@ namespace TenzoraX
 
             _batteryWasActiveLastTick = isActive;
             UpdateCalculatedBatteryBar();
-            UpdateBatterySummary();
         }
 
         private double GetCalculatedBatteryPercent()
@@ -1010,86 +1000,9 @@ namespace TenzoraX
             ApplyBatteryToTray();
         }
 
-        private void UpdateBatteryCalculatedLabel()
-        {
-            double totalMinutes = _settings.BatteryHours * 60;
-            double consumptionPerMinute = totalMinutes > 0 ? 100.0 / totalMinutes : 0;
-            TxtBatteryCalculated.Text = Lang.Format("Battery_Calculated", (int)totalMinutes, consumptionPerMinute);
-        }
-
         #endregion
 
         #region Battery UI Handlers
-
-        private void ChkBatteryEnable_Changed(object sender, RoutedEventArgs e)
-        {
-            _settings.BatteryEnabled = ChkBatteryEnable.IsChecked == true;
-            PanelBatterySettings.Visibility = _settings.BatteryEnabled ? Visibility.Visible : Visibility.Collapsed;
-            UpdateBatterySummary();
-            SaveSettings();
-            InitBatteryTimer();
-            if (!_settings.BatteryEnabled)
-                RefreshGamepadsList(); // restore original XInput battery reading
-            else
-            {
-                _lastBatteryInputTime = DateTime.UtcNow;
-                UpdateCalculatedBatteryBar();
-            }
-        }
-
-        private void TxtBatteryHours_LostFocus(object sender, RoutedEventArgs e)
-        {
-            ApplyBatteryHours();
-        }
-
-        private void TxtBatteryHours_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
-        {
-            if (e.Key == Key.Enter)
-            {
-                ApplyBatteryHours();
-                Keyboard.ClearFocus();
-                e.Handled = true;
-            }
-        }
-
-        private void ApplyBatteryHours()
-        {
-            if (double.TryParse(TxtBatteryHours.Text.Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out double hours))
-            {
-                if (hours < 0.5) hours = 0.5;
-                if (hours > 999) hours = 999;
-                _settings.BatteryHours = hours;
-                TxtBatteryHours.Text = hours.ToString("0.#");
-                SaveSettings();
-                UpdateBatteryCalculatedLabel();
-                UpdateCalculatedBatteryBar();
-            }
-            else
-            {
-                TxtBatteryHours.Text = _settings.BatteryHours.ToString("0.#");
-            }
-        }
-
-        private void ChkBatteryTray_Changed(object sender, RoutedEventArgs e)
-        {
-            _settings.BatteryTrayEnabled = ChkBatteryTray.IsChecked == true;
-            SaveSettings();
-            ApplyBatteryToTray();
-        }
-
-        private void ChkBatteryAnimation_Changed(object sender, RoutedEventArgs e)
-        {
-            _settings.BatteryAnimationEnabled = ChkBatteryAnimation.IsChecked == true;
-            SaveSettings();
-        }
-
-        private void BtnResetBattery_Click(object sender, RoutedEventArgs e)
-        {
-            _settings.BatteryActiveMinutes = 0;
-            _lastBatteryInputTime = DateTime.UtcNow;
-            SaveSettings();
-            UpdateCalculatedBatteryBar();
-        }
 
         private void ApplyBatteryToTray()
         {
@@ -1106,11 +1019,15 @@ namespace TenzoraX
             double percent = GetCalculatedBatteryPercent();
             int intPercent = (int)Math.Round(percent);
 
-            // Build tooltip
-            string tip = $"TenzoraX\n{this.Lang.Battery_Label} {percent:F1}%";
-            if (_settings.IsPaused)
-                tip += $"\n{this.Lang.Status_Paused}";
-            else if ((DateTime.UtcNow - _lastBatteryInputTime).TotalSeconds < BatteryActiveTimeoutSeconds)
+            // Build tooltip with controller info
+            string controllerName = "Kein Controller";
+            string batteryLabel = $"{percent:F1}%";
+            var controllers = ControllerManager.Instance.ConnectedControllerNames;
+            if (controllers.Count > 0)
+                controllerName = controllers[0];
+
+            string tip = $"TenzoraX\n{Lang.Battery_Label}: {batteryLabel}";
+            if ((DateTime.UtcNow - _lastBatteryInputTime).TotalSeconds < BatteryActiveTimeoutSeconds)
                 tip += $"\n{(Lang.CurrentLang == "de" ? "Controller aktiv" : "Controller active")}";
             _notifyIcon.Text = tip;
 
@@ -1118,121 +1035,44 @@ namespace TenzoraX
             if (intPercent == _batteryLastIconPercent) return;
             _batteryLastIconPercent = intPercent;
 
-            _notifyIcon.Icon = CreateBatteryIcon(percent);
-        }
-
-        private static void DrawRoundedRectangle(System.Drawing.Graphics g, System.Drawing.Pen pen, float x, float y, float w, float h, float r)
-        {
-            var path = new System.Drawing.Drawing2D.GraphicsPath();
-            path.AddArc(x, y, r * 2, r * 2, 180, 90);
-            path.AddArc(x + w - r * 2, y, r * 2, r * 2, 270, 90);
-            path.AddArc(x + w - r * 2, y + h - r * 2, r * 2, r * 2, 0, 90);
-            path.AddArc(x, y + h - r * 2, r * 2, r * 2, 90, 90);
-            path.CloseFigure();
-            g.DrawPath(pen, path);
-        }
-
-        private System.Drawing.Icon CreateBatteryIcon(double percent)
-        {
-            var bmp = new System.Drawing.Bitmap(32, 32);
-            using (var g = System.Drawing.Graphics.FromImage(bmp))
+            // Dispose old battery icon
+            if (_batteryIcon != null)
             {
-                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                g.Clear(System.Drawing.Color.Transparent);
+                try { _batteryIcon.Dispose(); } catch { }
+            }
 
-                System.Drawing.Color color;
-                if (percent > 60)
-                    color = System.Drawing.Color.FromArgb(16, 185, 129);
-                else if (percent > 30)
-                    color = System.Drawing.Color.FromArgb(245, 158, 11);
-                else
-                    color = System.Drawing.Color.FromArgb(239, 68, 68);
+            _batteryIcon = LoadBatteryIcon(percent);
+            _notifyIcon.Icon = _batteryIcon;
+        }
 
-                // Battery body
-                float bodyX = 5, bodyY = 9, bodyW = 20, bodyH = 14;
-                float cornerR = 3;
-                using (var pen = new System.Drawing.Pen(color, 1.5f))
-                    DrawRoundedRectangle(g, pen, bodyX, bodyY, bodyW, bodyH, cornerR);
+        private System.Drawing.Icon? _batteryIcon;
 
-                // Battery terminal (cap on top)
-                float termX = bodyX + bodyW / 2 - 2, termY = bodyY - 3, termW = 4, termH = 3;
-                using (var fillBrush = new System.Drawing.SolidBrush(color))
-                    g.FillRectangle(fillBrush, termX, termY, termW, termH);
+        private System.Drawing.Icon LoadBatteryIcon(double percent)
+        {
+            string fileName = percent >= 100 ? "battery_100.png"
+                           : percent >= 80 ? "battery_80.png"
+                           : percent >= 50 ? "battery_50.png"
+                           : percent >= 25 ? "battery_25.png"
+                           : percent >= 10 ? "battery_10.png"
+                           : "battery_0.png";
 
-                // Inner fill
-                float fillX = bodyX + 2, fillY = bodyY + 2;
-                float fillMaxW = bodyW - 4;
-                float fillH = bodyH - 4;
-                float fillW = fillMaxW * (float)(percent / 100.0);
-                if (fillW > 0)
+            try
+            {
+                var uri = new Uri($"pack://application:,,,/assets/battery/{fileName}", UriKind.RelativeOrAbsolute);
+                var streamInfo = System.Windows.Application.GetResourceStream(uri);
+                if (streamInfo != null)
                 {
-                    using (var fillBrush = new System.Drawing.SolidBrush(color))
-                        g.FillRectangle(fillBrush, fillX, fillY, fillW, fillH);
+                    using (var stream = streamInfo.Stream)
+                    using (var bitmap = new System.Drawing.Bitmap(stream))
+                    {
+                        var hIcon = bitmap.GetHicon();
+                        return System.Drawing.Icon.FromHandle(hIcon);
+                    }
                 }
             }
-            return System.Drawing.Icon.FromHandle(bmp.GetHicon());
-        }
+            catch { }
 
-        private void BtnToggleBattery_Click(object sender, RoutedEventArgs e)
-        {
-            _batterySettingsCollapsed = !_batterySettingsCollapsed;
-            PanelBatterySettings.Visibility = _batterySettingsCollapsed ? Visibility.Collapsed : Visibility.Visible;
-            BtnToggleBattery.Content = _batterySettingsCollapsed ? "▼" : "▲";
-            TxtBatterySummary.Visibility = _batterySettingsCollapsed ? Visibility.Visible : Visibility.Collapsed;
-            SaveSettings();
-        }
-
-        private void BtnConfirmBattery_Click(object sender, RoutedEventArgs e)
-        {
-            // Validate and save hours
-            if (double.TryParse(TxtBatteryHours.Text.Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out double hours))
-            {
-                if (hours < 0.5) hours = 0.5;
-                if (hours > 999) hours = 999;
-                _settings.BatteryHours = hours;
-                TxtBatteryHours.Text = hours.ToString("0.#");
-            }
-            else
-            {
-                TxtBatteryHours.Text = _settings.BatteryHours.ToString("0.#");
-            }
-
-            // Reset battery to 100% and enable battery system
-            _settings.BatteryActiveMinutes = 0;
-            _lastBatteryInputTime = DateTime.UtcNow;
-            _settings.BatteryEnabled = true;
-            ChkBatteryEnable.IsChecked = true;
-            PanelBatterySettings.Visibility = Visibility.Visible;
-
-            SaveSettings();
-            UpdateBatteryCalculatedLabel();
-            UpdateCalculatedBatteryBar();
-            InitBatteryTimer();
-
-            // Collapse settings after confirm
-            _batterySettingsCollapsed = true;
-            PanelBatterySettings.Visibility = Visibility.Collapsed;
-            UpdateBatterySummary();
-        }
-
-        private void UpdateBatterySummary()
-        {
-            if (!_settings.BatteryEnabled)
-            {
-                TxtBatterySummary.Visibility = Visibility.Collapsed;
-                return;
-            }
-
-            double percent = GetCalculatedBatteryPercent();
-            string status;
-            if (_settings.IsPaused)
-                status = Lang.CurrentLang == "de" ? "pausiert" : "paused";
-            else if ((DateTime.UtcNow - _lastBatteryInputTime).TotalSeconds < BatteryActiveTimeoutSeconds)
-                status = Lang.CurrentLang == "de" ? "aktiv" : "active";
-            else
-                status = Lang.CurrentLang == "de" ? "bereit" : "ready";
-
-            TxtBatterySummary.Text = $"{Lang.Battery_Label} {percent:F1}% – {status}";
+            return CreateControllerIcon();
         }
 
         private void ApplyOutputMode()
@@ -1255,34 +1095,6 @@ namespace TenzoraX
                 ApplyOutputMode();
                 SaveSettings();
             }
-        }
-
-        private void ChkSound_Changed(object sender, RoutedEventArgs e)
-        {
-            _settings.SoundEnabled = ChkSound.IsChecked == true;
-            SoundManager.Enabled = _settings.SoundEnabled;
-            SaveSettings();
-        }
-
-        private void SliderSoundVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            _settings.SoundVolume = SliderSoundVolume.Value / 100.0;
-            SoundManager.Volume = _settings.SoundVolume;
-            SaveSettings();
-        }
-
-        private void ChkNotification_Changed(object sender, RoutedEventArgs e)
-        {
-            _settings.HotkeyNotificationsEnabled = ChkNotification.IsChecked == true;
-            NotificationManager.Enabled = _settings.HotkeyNotificationsEnabled;
-            SaveSettings();
-        }
-
-        private void SliderNotificationDuration_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            _settings.NotificationDuration = SliderNotificationDuration.Value;
-            NotificationManager.Duration = _settings.NotificationDuration;
-            SaveSettings();
         }
 
         #endregion
@@ -1318,7 +1130,6 @@ namespace TenzoraX
             {
                 SelectProfile(selectedProfile);
             UpdateTrayMenu();
-            UpdateBatterySummary();
         }
         }
 
@@ -1765,22 +1576,6 @@ namespace TenzoraX
             }
         }
 
-        private void ChkPause_Changed(object sender, RoutedEventArgs e)
-        {
-            _settings.IsPaused = ChkPause.IsChecked == true;
-            SaveSettings();
-            if (_settings.IsPaused)
-            {
-                TxtStatus.Text = Lang.Status_Paused;
-                TxtStatus.Foreground = System.Windows.Media.Brushes.Orange;
-            }
-            else
-            {
-                RefreshGamepadsList();
-            }
-            UpdateTrayMenu();
-        }
-
         private void ChkAutostart_Changed(object sender, RoutedEventArgs e)
         {
             _settings.AutostartEnabled = ChkAutostart.IsChecked == true;
@@ -1891,14 +1686,6 @@ namespace TenzoraX
             }
             contextMenu.Items.Add(profilesItem);
 
-            var pauseItem = new System.Windows.Forms.ToolStripMenuItem(Lang.Tray_Pause, null, (s, e) =>
-            {
-                ChkPause.IsChecked = !ChkPause.IsChecked;
-            })
-            {
-                Checked = _settings.IsPaused
-            };
-            contextMenu.Items.Add(pauseItem);
             contextMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
             var exitItem = new System.Windows.Forms.ToolStripMenuItem(Lang.Tray_Exit, null, (s, e) =>
@@ -1913,36 +1700,51 @@ namespace TenzoraX
 
         private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
-            // Save notification position before exit
+            if (!_isExplicitClose && _settings.MinimizeToTray)
+            {
+                e.Cancel = true;
+                HideToTray(false);
+                return;
+            }
+
+            // 1. Stop controller polling
+            try { ControllerManager.Instance.Shutdown(); } catch { }
+
+            // 2. Stop battery timer
+            try { _batteryTimer?.Stop(); _batteryTimer = null; } catch { }
+
+            // 3. Save window position, size and settings
+            _settings.WindowWidth = Width;
+            _settings.WindowHeight = Height;
+            _settings.WindowLeft = Left;
+            _settings.WindowTop = Top;
             _settings.NotificationPositionX = NotificationManager.SavedPosX;
             _settings.NotificationPositionY = NotificationManager.SavedPosY;
             _settings.NotificationWidth = NotificationManager.NotificationWidth;
             SaveSettings();
 
-            if (!_isExplicitClose)
+            // 4. Dispose battery icon
+            if (_batteryIcon != null)
             {
-                if (_settings.MinimizeToTray)
-                {
-                    e.Cancel = true;
-                    HideToTray(false);
-                }
-                else
-                {
-                    if (_notifyIcon != null)
-                    {
-                        _notifyIcon.Visible = false;
-                        _notifyIcon.Dispose();
-                    }
-                }
+                try { _batteryIcon.Dispose(); _batteryIcon = null; } catch { }
             }
-            else
+
+            // 5. Dispose tray icon
+            if (_notifyIcon != null)
             {
-                if (_notifyIcon != null)
-                {
-                    _notifyIcon.Visible = false;
-                    _notifyIcon.Dispose();
-                }
+                _notifyIcon.Visible = false;
+                _notifyIcon.Dispose();
+                _notifyIcon = null;
             }
+
+            // 6. Mark clean shutdown – nothing needed (crash detection uses crash.log)
+            App.LogApp("TenzoraX wird beendet");
+        }
+
+        private void BtnSettings_Click(object sender, RoutedEventArgs e)
+        {
+            var win = new SettingsWindow(_settings, () => SaveSettings());
+            win.ShowDialog();
         }
 
         private System.Drawing.Icon CreateControllerIcon()
@@ -2013,6 +1815,90 @@ namespace TenzoraX
             Activate();
         }
 
+        private static void ShowCrashDialog()
+        {
+            string crashLogPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "TenzoraX", "Logs", "crash.log");
+            string logsDir = Path.GetDirectoryName(crashLogPath) ?? "";
+
+            var dialog = new Window
+            {
+                Title = "TenzoraX – Vorherige Sitzung nicht ordnungsgemäß beendet",
+                Width = 480,
+                Height = 220,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                ResizeMode = ResizeMode.NoResize,
+                WindowStyle = WindowStyle.SingleBorderWindow,
+                Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(30, 30, 40)),
+                Foreground = System.Windows.Media.Brushes.White,
+                FontFamily = new System.Windows.Media.FontFamily("Segoe UI"),
+                ShowInTaskbar = false
+            };
+
+            var stack = new System.Windows.Controls.StackPanel { Margin = new Thickness(20) };
+
+            stack.Children.Add(new System.Windows.Controls.TextBlock
+            {
+                Text = "TenzoraX wurde beim letzten Mal nicht ordnungsgemäß beendet.\n\nEin detaillierter Fehlerbericht wird automatisch erstellt, wenn technische Fehlerinformationen verfügbar sind.",
+                TextWrapping = System.Windows.TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 20)
+            });
+
+            var buttonPanel = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = System.Windows.HorizontalAlignment.Right };
+
+            System.Windows.Controls.Button MakeButton(string text, double width, bool isDefault)
+            {
+                return new System.Windows.Controls.Button
+                {
+                    Content = text,
+                    Width = width,
+                    Height = 28,
+                    Cursor = System.Windows.Input.Cursors.Hand,
+                    Margin = new Thickness(0, 0, 10, 0)
+                };
+            }
+
+            var crashBtn = MakeButton("Crash-Log öffnen", 130, false);
+            crashBtn.Click += (s, e) =>
+            {
+                try
+                {
+                    if (File.Exists(crashLogPath))
+                        Process.Start(new ProcessStartInfo(crashLogPath) { UseShellExecute = true });
+                    else if (Directory.Exists(logsDir))
+                        Process.Start(new ProcessStartInfo(logsDir) { UseShellExecute = true });
+                    else
+                        System.Windows.MessageBox.Show("Es wurde kein detaillierter Fehlerbericht gefunden.", "Crash-Log", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch { }
+            };
+            buttonPanel.Children.Add(crashBtn);
+
+            var okBtn = MakeButton("OK", 80, true);
+            okBtn.Click += (s, e) => dialog.Close();
+            okBtn.IsDefault = true;
+            okBtn.Margin = new Thickness(0);
+            buttonPanel.Children.Add(okBtn);
+
+            stack.Children.Add(buttonPanel);
+            dialog.Content = stack;
+            dialog.ShowDialog();
+        }
+
         #endregion
+    }
+
+    public class MappingPartTemplateSelector : DataTemplateSelector
+    {
+        public DataTemplate? ButtonTemplate { get; set; }
+        public DataTemplate? SeparatorTemplate { get; set; }
+
+        public override DataTemplate? SelectTemplate(object item, DependencyObject container)
+        {
+            if (item is MappingPart part)
+                return part.IsButton ? ButtonTemplate : SeparatorTemplate;
+            return base.SelectTemplate(item, container);
+        }
     }
 }
