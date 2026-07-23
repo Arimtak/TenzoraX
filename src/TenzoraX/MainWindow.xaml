@@ -70,13 +70,32 @@
     </Window.Resources>
 
     <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*"/>
             <ColumnDefinition Width="340"/>
         </Grid.ColumnDefinitions>
 
+        <!-- HEADER -->
+        <Border Grid.Row="0" Grid.ColumnSpan="2" Background="{StaticResource PanelBgBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="18,14" Margin="0,0,0,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="TenzoraX" FontSize="22" FontWeight="Bold" Foreground="#FFFFFF"/>
+                    <TextBlock Text="Modern Controller Mapper" FontSize="12" Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,0"/>
+                </StackPanel>
+                <TextBlock x:Name="TxtVersionHeader" Grid.Column="1" VerticalAlignment="Bottom" FontSize="11" Foreground="{StaticResource MutedTextBrush}" FontWeight="SemiBold"/>
+            </Grid>
+        </Border>
+
         <!-- LEFT PANEL: Gamepad & Keyboard -->
-        <Grid Grid.Column="0" Margin="0,0,10,0">
+        <Grid Grid.Row="1" Grid.Column="0" Margin="0,0,10,0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="350"/>
                 <RowDefinition Height="Auto"/>
@@ -319,7 +338,7 @@
         </Grid>
 
         <!-- RIGHT PANEL: Profiles -->
-        <Border Grid.Column="1" Background="{StaticResource PanelBgBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
+        <Border Grid.Row="1" Grid.Column="1" Background="{StaticResource PanelBgBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>

@@ -163,6 +163,7 @@ namespace TenzoraX
             Icon = CreateControllerIconSource();
             InitializeGamepadButtonMap();
             LoadSettings();
+            TxtVersionHeader.Text = $"v{AppVersion.Current}";
 
             // Cleanup: remove any leftover .old.exe from old update versions
             string oldExe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TenzoraX.old.exe");
