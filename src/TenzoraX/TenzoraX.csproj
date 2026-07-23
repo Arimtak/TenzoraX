@@ -12,6 +12,9 @@
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <Version>1.2.2</Version>
+    <FileVersion>1.2.2.0</FileVersion>
+    <AssemblyVersion>1.2.2.0</AssemblyVersion>
   </PropertyGroup>
 
   <ItemGroup>
