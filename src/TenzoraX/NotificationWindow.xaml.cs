@@ -78,22 +78,23 @@ namespace TenzoraX
 
                 double barWidth = ProgressBar.Width;
 
-                var slideIn = new DoubleAnimation(-360, 0, TimeSpan.FromMilliseconds(350));
+                var slideIn = new DoubleAnimation(-360, 0, TimeSpan.FromMilliseconds(600));
                 slideIn.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
                 SlideTransform.BeginAnimation(TranslateTransform.XProperty, slideIn);
 
-                var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200));
+                var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(250));
                 BeginAnimation(OpacityProperty, fadeIn);
 
-                var progressDelay = TimeSpan.FromMilliseconds(400);
+                int slideInMs = 650;
+                var progressDelay = TimeSpan.FromMilliseconds(slideInMs);
                 var progress = new DoubleAnimation(barWidth, 0, TimeSpan.FromSeconds(_duration));
                 progress.BeginTime = progressDelay;
                 ProgressBar.BeginAnimation(FrameworkElement.WidthProperty, progress);
 
-                int totalMs = 400 + (int)(_duration * 1000);
+                int totalMs = slideInMs + (int)(_duration * 1000);
                 var totalVisible = TimeSpan.FromMilliseconds(totalMs);
 
-                var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(250));
+                var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(800));
                 fadeOut.BeginTime = totalVisible;
                 fadeOut.Completed += (s, e) =>
                 {
@@ -107,7 +108,7 @@ namespace TenzoraX
                 };
                 BeginAnimation(OpacityProperty, fadeOut);
 
-                var slideOut = new DoubleAnimation(0, -360, TimeSpan.FromMilliseconds(300));
+                var slideOut = new DoubleAnimation(0, -360, TimeSpan.FromMilliseconds(800));
                 slideOut.BeginTime = totalVisible;
                 slideOut.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn };
                 SlideTransform.BeginAnimation(TranslateTransform.XProperty, slideOut);
