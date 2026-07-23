@@ -1,7 +1,8 @@
 ﻿<Application x:Class="TenzoraX.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:TenzoraX">
+             xmlns:local="clr-namespace:TenzoraX"
+             StartupUri="MainWindow.xaml">
     <Application.Resources>
         <!-- Modern Dark Theme Color Palette -->
         <Color x:Key="BgColor">#0F0F12</Color>
