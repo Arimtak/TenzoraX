@@ -124,6 +124,7 @@ namespace TenzoraX
 
         // Battery tracking
         private System.Windows.Threading.DispatcherTimer? _batteryTimer;
+        private bool _settingsLoaded;
         private DateTime _lastBatteryInputTime = DateTime.MinValue;
         private bool _batteryWasActiveLastTick = false;
         private const double BatteryActiveTimeoutSeconds = 5;
@@ -294,6 +295,9 @@ namespace TenzoraX
             {
                 HideToTray(false);
             }
+
+            _settingsLoaded = true;
+            SaveSettings();
             }
             catch (Exception ex)
             {
@@ -1538,6 +1542,7 @@ namespace TenzoraX
 
         private void SaveSettings()
         {
+            if (!_settingsLoaded) return;
             try
             {
                 string json = JsonSerializer.Serialize(_settings, new JsonSerializerOptions { WriteIndented = true });
