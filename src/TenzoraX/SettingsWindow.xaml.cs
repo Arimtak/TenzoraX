@@ -137,11 +137,11 @@ public partial class SettingsWindow : Window
             var info = await UpdateManager.CheckForUpdate();
             if (info == null)
             {
-                System.Windows.MessageBox.Show(this,
+                ThemeHelper.ShowMessage(this,
                     LanguageManager.Instance.CurrentLang == "de"
                         ? "Es ist bereits die aktuellste Version installiert."
                         : "You already have the latest version installed.",
-                    "Update", MessageBoxButton.OK, MessageBoxImage.Information);
+                    "Update");
                 return;
             }
 

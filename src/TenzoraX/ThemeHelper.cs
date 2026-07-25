@@ -32,5 +32,65 @@ namespace TenzoraX
             if (window.FontFamily == null || window.FontFamily.Source == "Portable User Interface")
                 window.FontFamily = new System.Windows.Media.FontFamily("Segoe UI");
         }
+
+        public static MessageBoxResult ShowMessage(Window owner, string message, string title, MessageBoxButton buttons = MessageBoxButton.OK)
+        {
+            var win = new Window
+            {
+                Title = title,
+                Width = 380,
+                Height = 180,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ResizeMode = ResizeMode.NoResize,
+                WindowStyle = WindowStyle.SingleBorderWindow,
+                ShowInTaskbar = false,
+                Owner = owner
+            };
+            StyleWindow(win);
+
+            var grid = new System.Windows.Controls.Grid { Margin = new Thickness(20) };
+            grid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            grid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });
+
+            var text = new System.Windows.Controls.TextBlock
+            {
+                Text = message,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            grid.Children.Add(text);
+
+            var btnPanel = new System.Windows.Controls.StackPanel
+            {
+                Orientation = System.Windows.Controls.Orientation.Horizontal,
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Right
+            };
+            System.Windows.Controls.Grid.SetRow(btnPanel, 1);
+
+            MessageBoxResult result = MessageBoxResult.OK;
+            var okBtn = new System.Windows.Controls.Button { Content = "OK", Width = 80, Height = 28 };
+            okBtn.Click += (s, e) => { result = MessageBoxResult.OK; win.Close(); };
+
+            var yesBtn = new System.Windows.Controls.Button { Content = "Ja", Width = 80, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
+            yesBtn.Click += (s, e) => { result = MessageBoxResult.Yes; win.Close(); };
+
+            var noBtn = new System.Windows.Controls.Button { Content = "Nein", Width = 80, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
+            noBtn.Click += (s, e) => { result = MessageBoxResult.No; win.Close(); };
+
+            if (buttons == MessageBoxButton.OK)
+            {
+                btnPanel.Children.Add(okBtn);
+            }
+            else if (buttons == MessageBoxButton.YesNo)
+            {
+                btnPanel.Children.Add(yesBtn);
+                btnPanel.Children.Add(noBtn);
+            }
+
+            grid.Children.Add(btnPanel);
+            win.Content = grid;
+            win.ShowDialog();
+            return result;
+        }
     }
 }
