@@ -73,7 +73,8 @@ namespace TenzoraX
             {
                 string tempDir = Path.Combine(Path.GetTempPath(), "TenzoraXUpdate");
                 Directory.CreateDirectory(tempDir);
-                string zipPath = Path.Combine(tempDir, "update.zip");
+                bool isZip = url.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
+                string downloadPath = Path.Combine(tempDir, isZip ? "update.zip" : "update.exe");
 
                 var req = new HttpRequestMessage(HttpMethod.Get, url);
                 req.Headers.UserAgent.ParseAdd("TenzoraX-Updater/1.0");
@@ -83,7 +84,7 @@ namespace TenzoraX
 
                 long totalBytes = resp.Content.Headers.ContentLength ?? -1;
                 using var stream = await resp.Content.ReadAsStreamAsync();
-                using var fs = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                using var fs = new FileStream(downloadPath, FileMode.Create, FileAccess.Write, FileShare.None);
 
                 byte[] buffer = new byte[8192];
                 long totalRead = 0;
@@ -95,16 +96,21 @@ namespace TenzoraX
                     if (progress != null && totalBytes > 0)
                         progress.Report((int)(totalRead * 100 / totalBytes));
                 }
+                fs.Close();
 
-                string extractDir = Path.Combine(tempDir, "extracted");
-                if (Directory.Exists(extractDir))
-                    Directory.Delete(extractDir, true);
-                ZipFile.ExtractToDirectory(zipPath, extractDir);
+                if (isZip)
+                {
+                    string extractDir = Path.Combine(tempDir, "extracted");
+                    if (Directory.Exists(extractDir))
+                        Directory.Delete(extractDir, true);
+                    ZipFile.ExtractToDirectory(downloadPath, extractDir);
 
-                var exeFiles = Directory.GetFiles(extractDir, "*.exe", SearchOption.TopDirectoryOnly);
-                if (exeFiles.Length == 0) return null;
+                    var exeFiles = Directory.GetFiles(extractDir, "*.exe", SearchOption.TopDirectoryOnly);
+                    if (exeFiles.Length == 0) return null;
+                    return exeFiles[0];
+                }
 
-                return exeFiles[0];
+                return downloadPath;
             }
             catch { return null; }
         }
