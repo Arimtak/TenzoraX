@@ -8,8 +8,13 @@ namespace TenzoraX;
 
 public partial class App : System.Windows.Application
 {
-    private static readonly Mutex _instanceMutex = new(true, "TenzoraX-{3F2C5B1A-9E8D-4A7C-B6F3-2D1E0C8A5B4F}");
+    private static readonly Mutex _instanceMutex = new(false, "TenzoraX-{3F2C5B1A-9E8D-4A7C-B6F3-2D1E0C8A5B4F}");
     private static bool _ownsMutex;
+
+    private static readonly EventWaitHandle _activateSignal = new EventWaitHandle(
+        false, EventResetMode.AutoReset, "TenzoraX-Activate-{3F2C5B1A-9E8D-4A7C-B6F3-2D1E0C8A5B4F}");
+
+    internal static EventWaitHandle ActivateSignal => _activateSignal;
 
     private static string LogsDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
@@ -58,16 +63,41 @@ public partial class App : System.Windows.Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        _ownsMutex = _instanceMutex.WaitOne(TimeSpan.Zero, false);
+        if (!_ownsMutex)
+        {
+            LogApp("Zweite Instanz erkannt – signalisiere vorhandene Instanz");
+            try { _activateSignal.Set(); } catch { }
+            Shutdown();
+            return;
+        }
+
+        // Start listener thread for activation signals from second instances
+        var listener = new Thread(() =>
+        {
+            while (_ownsMutex)
+            {
+                try
+                {
+                    _activateSignal.WaitOne();
+                    Current.Dispatcher.BeginInvoke(() =>
+                    {
+                        if (Current.MainWindow != null)
+                        {
+                            Current.MainWindow.Show();
+                            Current.MainWindow.WindowState = WindowState.Normal;
+                            Current.MainWindow.Activate();
+                        }
+                    });
+                }
+                catch { }
+            }
+        });
+        listener.IsBackground = true;
+        listener.Start();
+
         try
         {
-            _ownsMutex = _instanceMutex.WaitOne(TimeSpan.Zero, false);
-            if (!_ownsMutex)
-            {
-                LogApp("Zweite Instanz erkannt – werde beendet");
-                Shutdown();
-                return;
-            }
-
             EnsureLogsDir();
             HasCrashLog = File.Exists(CrashLogPath);
             CleanupOldSessionLock();
@@ -89,11 +119,14 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         base.OnExit(e);
+        try { _activateSignal.Set(); } catch { }
+        _activateSignal.Dispose();
         if (_ownsMutex)
         {
+            _ownsMutex = false;
             try { _instanceMutex.ReleaseMutex(); } catch { }
-            _instanceMutex.Dispose();
         }
+        _instanceMutex.Dispose();
     }
 
     internal static void DeleteCrashLog()
