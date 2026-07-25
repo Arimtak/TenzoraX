@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 
@@ -7,6 +8,9 @@ namespace TenzoraX;
 
 public partial class App : System.Windows.Application
 {
+    private static readonly Mutex _instanceMutex = new(true, "TenzoraX-{3F2C5B1A-9E8D-4A7C-B6F3-2D1E0C8A5B4F}");
+    private static bool _ownsMutex;
+
     private static string LogsDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
         "TenzoraX", "Logs");
@@ -56,6 +60,14 @@ public partial class App : System.Windows.Application
     {
         try
         {
+            _ownsMutex = _instanceMutex.WaitOne(TimeSpan.Zero, false);
+            if (!_ownsMutex)
+            {
+                LogApp("Zweite Instanz erkannt – werde beendet");
+                Shutdown();
+                return;
+            }
+
             EnsureLogsDir();
             HasCrashLog = File.Exists(CrashLogPath);
             CleanupOldSessionLock();
@@ -71,6 +83,16 @@ public partial class App : System.Windows.Application
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
             Shutdown();
+        }
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        base.OnExit(e);
+        if (_ownsMutex)
+        {
+            try { _instanceMutex.ReleaseMutex(); } catch { }
+            _instanceMutex.Dispose();
         }
     }
 
