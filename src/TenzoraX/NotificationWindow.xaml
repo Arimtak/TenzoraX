@@ -9,7 +9,7 @@
     <Window.RenderTransform>
         <TranslateTransform x:Name="SlideTransform"/>
     </Window.RenderTransform>
-    <Border Background="#1A1A24" BorderBrush="#2A2A3A" BorderThickness="1" CornerRadius="12" Padding="20,14,20,12">
+    <Border Background="{StaticResource PanelBgBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="20,14,20,12">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -23,7 +23,7 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="⌨" FontSize="18" VerticalAlignment="Center" Margin="0,0,10,0"/>
                 <StackPanel Grid.Column="1">
-                    <TextBlock x:Name="TxtCombo" FontWeight="SemiBold" FontSize="15" Foreground="#E0E0E0"/>
+                    <TextBlock x:Name="TxtCombo" FontWeight="SemiBold" FontSize="15" Foreground="{StaticResource TextBrush}"/>
                     <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                         <TextBlock Text="→" FontSize="16" Foreground="#10B981" FontWeight="Bold"/>
                         <TextBlock x:Name="TxtAction" FontWeight="Bold" FontSize="15" Foreground="#10B981" Margin="8,0,0,0"/>

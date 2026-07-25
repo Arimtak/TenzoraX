@@ -79,6 +79,7 @@ namespace TenzoraX
         public double WindowHeight { get; set; } = 720;
         public double WindowLeft { get; set; } = double.NaN;
         public double WindowTop { get; set; } = double.NaN;
+        public bool WindowMaximized { get; set; } = false;
         public string OutputMode { get; set; } = "VK";
         public bool SoundEnabled { get; set; } = true;
         public double SoundVolume { get; set; } = 0.5;
@@ -177,15 +178,31 @@ namespace TenzoraX
                     Width = _settings.WindowWidth;
                     Height = _settings.WindowHeight;
                 }
+                bool positionValid = false;
                 if (!double.IsNaN(_settings.WindowLeft) && !double.IsNaN(_settings.WindowTop))
                 {
-                    var screen = System.Windows.Forms.Screen.FromPoint(new System.Drawing.Point((int)_settings.WindowLeft, (int)_settings.WindowTop));
-                    if (screen != null && screen.WorkingArea.Contains(new System.Drawing.Rectangle((int)_settings.WindowLeft, (int)_settings.WindowTop, (int)_settings.WindowWidth, (int)_settings.WindowHeight)))
+                    var rect = new System.Drawing.Rectangle(
+                        (int)_settings.WindowLeft, (int)_settings.WindowTop,
+                        (int)_settings.WindowWidth, (int)_settings.WindowHeight);
+                    foreach (var screen in System.Windows.Forms.Screen.AllScreens)
                     {
-                        Left = _settings.WindowLeft;
-                        Top = _settings.WindowTop;
+                        if (screen.WorkingArea.IntersectsWith(rect))
+                        {
+                            Left = _settings.WindowLeft;
+                            Top = _settings.WindowTop;
+                            positionValid = true;
+                            break;
+                        }
                     }
                 }
+                if (!positionValid)
+                {
+                    WindowStartupLocation = WindowStartupLocation.CenterScreen;
+                }
+
+                // Restore maximized state (must be set after size/position)
+                if (_settings.WindowMaximized)
+                    WindowState = WindowState.Maximized;
 
                 // Auto-elevate: only if setting is on AND we're not already admin
                 if (_settings.RunAsAdministrator && !InputSimulator.IsRunningAsAdmin())
@@ -283,6 +300,10 @@ namespace TenzoraX
 
             // Re-center when window is resized (only if user hasn't manually positioned)
             CanvasGamepad.SizeChanged += CanvasGamepad_SizeChanged;
+
+            // Auto-save window size/position during resize/move (crash-safe persistence)
+            SizeChanged += (s, e) => { if (_settingsLoaded) SaveWindowPosition(); };
+            StateChanged += (s, e) => { if (_settingsLoaded) { _settings.WindowMaximized = WindowState == WindowState.Maximized; SaveSettings(); } };
 
             // Check for updates after everything is ready
             Dispatcher.BeginInvoke(new Action(async () =>
@@ -1352,6 +1373,26 @@ namespace TenzoraX
             ReapplyButtonPositions();
         }
 
+        private void SaveWindowPosition()
+        {
+            if (WindowState == WindowState.Maximized && RestoreBounds.Width > 0 && RestoreBounds.Height > 0)
+            {
+                _settings.WindowWidth = RestoreBounds.Width;
+                _settings.WindowHeight = RestoreBounds.Height;
+                _settings.WindowLeft = RestoreBounds.Left;
+                _settings.WindowTop = RestoreBounds.Top;
+            }
+            else if (WindowState == WindowState.Normal)
+            {
+                _settings.WindowWidth = Width;
+                _settings.WindowHeight = Height;
+                _settings.WindowLeft = Left;
+                _settings.WindowTop = Top;
+            }
+            _settings.WindowMaximized = WindowState == WindowState.Maximized;
+            SaveSettings();
+        }
+
         private void SaveSettings()
         {
             if (!_settingsLoaded) return;
@@ -1745,10 +1786,7 @@ namespace TenzoraX
             try { _batteryTimer?.Stop(); _batteryTimer = null; } catch { }
 
             // 3. Save window position, size and settings
-            _settings.WindowWidth = Width;
-            _settings.WindowHeight = Height;
-            _settings.WindowLeft = Left;
-            _settings.WindowTop = Top;
+            SaveWindowPosition();
             _settings.NotificationPositionX = NotificationManager.SavedPosX;
             _settings.NotificationPositionY = NotificationManager.SavedPosY;
             _settings.NotificationWidth = NotificationManager.NotificationWidth;
@@ -1863,11 +1901,9 @@ namespace TenzoraX
                 WindowStartupLocation = WindowStartupLocation.CenterScreen,
                 ResizeMode = ResizeMode.NoResize,
                 WindowStyle = WindowStyle.SingleBorderWindow,
-                Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(30, 30, 40)),
-                Foreground = System.Windows.Media.Brushes.White,
-                FontFamily = new System.Windows.Media.FontFamily("Segoe UI"),
                 ShowInTaskbar = false
             };
+            ThemeHelper.StyleWindow(dialog);
 
             var stack = new System.Windows.Controls.StackPanel { Margin = new Thickness(20) };
 
