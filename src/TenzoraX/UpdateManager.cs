@@ -46,7 +46,8 @@ namespace TenzoraX
                     foreach (var asset in assets.EnumerateArray())
                     {
                         string name = asset.GetProperty("name").GetString() ?? "";
-                        if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                        if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
+                            name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                         {
                             downloadUrl = asset.GetProperty("browser_download_url").GetString() ?? "";
                             break;
