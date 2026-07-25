@@ -1066,7 +1066,8 @@ namespace TenzoraX
                     using (var bitmap = new System.Drawing.Bitmap(stream))
                     {
                         var hIcon = bitmap.GetHicon();
-                        return System.Drawing.Icon.FromHandle(hIcon);
+                        var icon = System.Drawing.Icon.FromHandle(hIcon);
+                        return (System.Drawing.Icon)icon.Clone();
                     }
                 }
             }
@@ -1664,6 +1665,8 @@ namespace TenzoraX
             if (_notifyIcon == null) return;
 
             var contextMenu = new System.Windows.Forms.ContextMenuStrip();
+            ApplyDarkTheme(contextMenu);
+
             var openItem = new System.Windows.Forms.ToolStripMenuItem(Lang.Tray_Open, null, (s, e) => RestoreFromTray())
             {
                 Font = new System.Drawing.Font(System.Drawing.SystemFonts.DefaultFont, System.Drawing.FontStyle.Bold)
@@ -1684,6 +1687,11 @@ namespace TenzoraX
                     profileSubItem.Checked = true;
                 profilesItem.DropDownItems.Add(profileSubItem);
             }
+            profilesItem.DropDownOpening += (s, e) =>
+            {
+                if (profilesItem.DropDown is System.Windows.Forms.ToolStripDropDownMenu sub)
+                    ApplyDarkTheme(sub);
+            };
             contextMenu.Items.Add(profilesItem);
 
             contextMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
@@ -1696,6 +1704,29 @@ namespace TenzoraX
             contextMenu.Items.Add(exitItem);
 
             _notifyIcon.ContextMenuStrip = contextMenu;
+        }
+
+        private static void ApplyDarkTheme(System.Windows.Forms.ToolStripDropDownMenu menu)
+        {
+            menu.BackColor = System.Drawing.Color.FromArgb(30, 30, 40);
+            menu.ForeColor = System.Drawing.Color.White;
+            menu.Renderer = new System.Windows.Forms.ToolStripProfessionalRenderer(new DarkColorTable());
+        }
+
+        private class DarkColorTable : System.Windows.Forms.ProfessionalColorTable
+        {
+            public override System.Drawing.Color ToolStripDropDownBackground => System.Drawing.Color.FromArgb(30, 30, 40);
+            public override System.Drawing.Color MenuItemBorder => System.Drawing.Color.FromArgb(60, 60, 80);
+            public override System.Drawing.Color MenuItemSelected => System.Drawing.Color.FromArgb(60, 60, 80);
+            public override System.Drawing.Color MenuItemSelectedGradientBegin => System.Drawing.Color.FromArgb(60, 60, 80);
+            public override System.Drawing.Color MenuItemSelectedGradientEnd => System.Drawing.Color.FromArgb(50, 50, 70);
+            public override System.Drawing.Color MenuItemPressedGradientBegin => System.Drawing.Color.FromArgb(60, 60, 80);
+            public override System.Drawing.Color MenuItemPressedGradientEnd => System.Drawing.Color.FromArgb(50, 50, 70);
+            public override System.Drawing.Color ImageMarginGradientBegin => System.Drawing.Color.FromArgb(30, 30, 40);
+            public override System.Drawing.Color ImageMarginGradientMiddle => System.Drawing.Color.FromArgb(30, 30, 40);
+            public override System.Drawing.Color ImageMarginGradientEnd => System.Drawing.Color.FromArgb(30, 30, 40);
+            public override System.Drawing.Color SeparatorDark => System.Drawing.Color.FromArgb(60, 60, 70);
+            public override System.Drawing.Color SeparatorLight => System.Drawing.Color.FromArgb(30, 30, 40);
         }
 
         private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -1764,14 +1795,16 @@ namespace TenzoraX
             catch { }
 
             // Fallback: draw a simple placeholder icon
-            var bmp = new System.Drawing.Bitmap(32, 32);
+            using (var bmp = new System.Drawing.Bitmap(32, 32))
             using (var g = System.Drawing.Graphics.FromImage(bmp))
             {
                 g.Clear(System.Drawing.Color.Transparent);
                 g.FillRectangle(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(40, 40, 50)), 4, 10, 24, 14);
                 g.FillEllipse(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(0, 210, 255)), 12, 14, 8, 8);
+                var hIcon = bmp.GetHicon();
+                var icon = System.Drawing.Icon.FromHandle(hIcon);
+                return (System.Drawing.Icon)icon.Clone();
             }
-            return System.Drawing.Icon.FromHandle(bmp.GetHicon());
         }
 
         private ImageSource CreateControllerIconSource()

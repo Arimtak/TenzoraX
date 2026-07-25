@@ -64,7 +64,7 @@ namespace TenzoraX
                     ReleaseUrl = releaseUrl
                 };
             }
-            catch { return null; }
+            catch (Exception ex) { App.LogApp($"CheckForUpdate-Fehler: {ex.GetType().Name}: {ex.Message}"); return null; }
         }
 
         public static async Task<string?> DownloadUpdate(string url, IProgress<int>? progress = null)
@@ -112,7 +112,7 @@ namespace TenzoraX
 
                 return downloadPath;
             }
-            catch { return null; }
+            catch (Exception ex) { App.LogApp($"DownloadUpdate-Fehler: {ex.GetType().Name}: {ex.Message}"); return null; }
         }
 
         public static void InstallUpdate(string newExePath)
