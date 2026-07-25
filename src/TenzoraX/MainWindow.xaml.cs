@@ -294,7 +294,7 @@ namespace TenzoraX
             // Final position reapply & centering after layout is complete
             Dispatcher.BeginInvoke(new Action(() =>
             {
-                CenterControllerIfDefault();
+                CenterController();
                 ReapplyButtonPositions();
             }), System.Windows.Threading.DispatcherPriority.Loaded);
 
@@ -435,12 +435,12 @@ namespace TenzoraX
                 double newLeft = _originalLeft + (currentPosition.X - _dragStartPoint.X);
                 double newTop = _originalTop + (currentPosition.Y - _dragStartPoint.Y);
 
-                if (newLeft < 0) newLeft = 0;
-                if (newTop < 0) newTop = 0;
-                if (newLeft > CanvasGamepad.ActualWidth - _draggedElement.ActualWidth)
-                    newLeft = CanvasGamepad.ActualWidth - _draggedElement.ActualWidth;
-                if (newTop > CanvasGamepad.ActualHeight - _draggedElement.ActualHeight)
-                    newTop = CanvasGamepad.ActualHeight - _draggedElement.ActualHeight;
+                double elW = _draggedElement.ActualWidth;
+                double elH = _draggedElement.ActualHeight;
+                double maxL = CanvasGamepad.ActualWidth - elW;
+                double maxT = CanvasGamepad.ActualHeight - elH;
+                if (maxL >= 0) newLeft = Math.Clamp(newLeft, 0, maxL);
+                if (maxT >= 0) newTop = Math.Clamp(newTop, 0, maxT);
 
                 Canvas.SetLeft(_draggedElement, newLeft);
                 Canvas.SetTop(_draggedElement, newTop);
@@ -515,10 +515,8 @@ namespace TenzoraX
             }
         }
 
-        private void CenterControllerIfDefault()
+        private void CenterController()
         {
-            if (_settings.HasCustomPosition) return;
-
             double cw = CanvasGamepad.ActualWidth;
             double ch = CanvasGamepad.ActualHeight;
             if (cw <= 0 || ch <= 0) return;
@@ -540,8 +538,7 @@ namespace TenzoraX
 
         private void CanvasGamepad_SizeChanged(object sender, SizeChangedEventArgs e)
         {
-            if (_settings.HasCustomPosition) return;
-            CenterControllerIfDefault();
+            CenterController();
             ReapplyButtonPositions();
         }
 
@@ -1070,11 +1067,11 @@ namespace TenzoraX
 
         private System.Drawing.Icon LoadBatteryIcon(double percent)
         {
-            string fileName = percent >= 100 ? "battery_100.png"
-                           : percent >= 80 ? "battery_80.png"
-                           : percent >= 50 ? "battery_50.png"
-                           : percent >= 25 ? "battery_25.png"
-                           : percent >= 10 ? "battery_10.png"
+            string fileName = percent >= 80 ? "battery_100.png"
+                           : percent >= 60 ? "battery_80.png"
+                           : percent >= 40 ? "battery_50.png"
+                           : percent >= 20 ? "battery_25.png"
+                           : percent > 0  ? "battery_10.png"
                            : "battery_0.png";
 
             try
@@ -1313,14 +1310,6 @@ namespace TenzoraX
                 {
                     string json = File.ReadAllText(ConfigFilePath);
                     _settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
-
-                    // Migration: existing config with a non-default ControllerLeft = user customized
-                    if (!_settings.HasCustomPosition)
-                    {
-                        double left = _settings.ControllerLeft;
-                        if (Math.Abs(left - 50) > 1 && Math.Abs(left) > 1)
-                            _settings.HasCustomPosition = true;
-                    }
                 }
                 catch { _settings = new AppSettings(); }
             }
@@ -1774,6 +1763,7 @@ namespace TenzoraX
         {
             if (!_isExplicitClose && _settings.MinimizeToTray)
             {
+                SaveWindowPosition();
                 e.Cancel = true;
                 HideToTray(false);
                 return;
@@ -1792,18 +1782,23 @@ namespace TenzoraX
             _settings.NotificationWidth = NotificationManager.NotificationWidth;
             SaveSettings();
 
-            // 4. Dispose battery icon
+            // 4. Dispose tray icon - hide first, then clean up
+            try
+            {
+                if (_notifyIcon != null)
+                {
+                    _notifyIcon.Visible = false;
+                    _notifyIcon.Icon = null;
+                    _notifyIcon.Dispose();
+                    _notifyIcon = null;
+                }
+            }
+            catch { }
+
+            // 5. Dispose battery icon
             if (_batteryIcon != null)
             {
                 try { _batteryIcon.Dispose(); _batteryIcon = null; } catch { }
-            }
-
-            // 5. Dispose tray icon
-            if (_notifyIcon != null)
-            {
-                _notifyIcon.Visible = false;
-                _notifyIcon.Dispose();
-                _notifyIcon = null;
             }
 
             // 6. Mark clean shutdown – nothing needed (crash detection uses crash.log)
@@ -1881,8 +1876,9 @@ namespace TenzoraX
 
         private void RestoreFromTray()
         {
+            if (WindowState == WindowState.Minimized)
+                WindowState = WindowState.Normal;
             Show();
-            WindowState = WindowState.Normal;
             Activate();
         }
 

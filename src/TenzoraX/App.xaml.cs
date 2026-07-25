@@ -30,6 +30,14 @@ public partial class App : System.Windows.Application
         {
             if (e.ExceptionObject is Exception ex)
             {
+                // Ignore CRT shutdown noise from single-file publish
+                if (ex is DllNotFoundException &&
+                    ex.StackTrace != null &&
+                    (ex.StackTrace.Contains("__std_type_info_destroy_list") ||
+                     ex.StackTrace.Contains("__scrt_uninitialize_type_info") ||
+                     ex.StackTrace.Contains("_app_exit_callback")))
+                    return;
+
                 LogCrash("AppDomain", ex);
                 LogApp("FATAL: AppDomain crash – Prozess wird beendet");
             }
