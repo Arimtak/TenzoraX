@@ -124,29 +124,61 @@ namespace TenzoraX
             string tempDir = Path.Combine(Path.GetTempPath(), "TenzoraXUpdate");
             Directory.CreateDirectory(tempDir);
             string scriptPath = Path.Combine(tempDir, "update.ps1");
-            string logPath = Path.Combine(
+            string logDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                "TenzoraX", "Logs", "update.log");
+                "TenzoraX", "Logs");
+            Directory.CreateDirectory(logDir);
+            string logPath = Path.Combine(logDir, "update.log");
             string targetDir = Path.GetDirectoryName(currentExe) ?? "";
 
+            App.LogApp($"InstallUpdate: currentExe={currentExe}");
+            App.LogApp($"InstallUpdate: newExePath={newExePath}");
+            App.LogApp($"InstallUpdate: pid={pid}");
+
             string script = $@"param()
-$log = ""{logPath}""
-$old = ""{currentExe}""
-$new = ""{newExePath}""
-$targetPid = {pid}
-function Log {{ param($m) $e = ""[$(Get-Date -Format 'HH:mm:ss')] $m""; Add-Content -Path $log -Value $e }}
-Log ""Update gestartet""
-Log ""Warte auf PID $targetPid ...""
-while ((Get-Process -Id $targetPid -ErrorAction SilentlyContinue) -ne $null) {{ Start-Sleep -Seconds 1 }}
-Start-Sleep -Seconds 1
-Log ""Prozess beendet""
-Log ""Lösche alte Datei: $old""
-Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
-Log ""Kopiere neue Datei: $new -> $old""
-Copy-Item -LiteralPath $new -Destination $old -Force
-if (Test-Path $old) {{ Log ""Neue Datei vorhanden""; Start-Process -FilePath $old; Log ""Neue Version gestartet"" }} else {{ Log ""FEHLER: Neue Datei nicht gefunden!"" }}
-Remove-Item -LiteralPath ""$env:TEMP\TenzoraXUpdate"" -Recurse -Force -ErrorAction SilentlyContinue
-Log ""Update abgeschlossen""
+try {{
+    $log = ""{logPath}""
+    $old = ""{currentExe}""
+    $new = ""{newExePath}""
+    $targetPid = {pid}
+    $now = Get-Date -Format 'HH:mm:ss'
+    Add-Content -Path $log -Value ""[$now] Update gestartet""
+    Add-Content -Path $log -Value ""[$now] alt: $old""
+    Add-Content -Path $log -Value ""[$now] neu: $new""
+    Add-Content -Path $log -Value ""[$now] PID: $targetPid""
+
+    Add-Content -Path $log -Value ""[$now] Warte auf Prozessende ...""
+    while ((Get-Process -Id $targetPid -ErrorAction SilentlyContinue) -ne $null) {{
+        Start-Sleep -Milliseconds 500
+    }}
+    Start-Sleep -Seconds 1
+    $now = Get-Date -Format 'HH:mm:ss'
+    Add-Content -Path $log -Value ""[$now] Prozess beendet""
+
+    Add-Content -Path $log -Value ""[$now] Lösche: $old""
+    Remove-Item -LiteralPath $old -Force -ErrorAction Stop
+    Add-Content -Path $log -Value ""[$now] Alt gelöscht""
+
+    Add-Content -Path $log -Value ""[$now] Kopiere: $new -> $old""
+    Copy-Item -LiteralPath $new -Destination $old -Force -ErrorAction Stop
+    Add-Content -Path $log -Value ""[$now] Kopiert""
+
+    if (Test-Path $old) {{
+        Add-Content -Path $log -Value ""[$now] Neue EXE existiert, starte ...""
+        Start-Process -FilePath $old
+        Add-Content -Path $log -Value ""[$now] Neue Version gestartet""
+    }} else {{
+        Add-Content -Path $log -Value ""[$now] FEHLER: Neue EXE nicht gefunden!""
+    }}
+
+    Remove-Item -LiteralPath ""$env:TEMP\TenzoraXUpdate"" -Recurse -Force -ErrorAction SilentlyContinue
+    $now = Get-Date -Format 'HH:mm:ss'
+    Add-Content -Path $log -Value ""[$now] Update abgeschlossen""
+}} catch {{
+    $err = $_.Exception.Message
+    $now = Get-Date -Format 'HH:mm:ss'
+    Add-Content -Path $log -Value ""[$now] FEHLER: $err""
+}}
 ";
             File.WriteAllText(scriptPath, script);
             App.LogApp($"Update-Skript erstellt: {scriptPath}");
