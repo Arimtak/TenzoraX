@@ -121,49 +121,46 @@ namespace TenzoraX
             if (string.IsNullOrEmpty(currentExe)) return;
 
             int pid = Process.GetCurrentProcess().Id;
-            string batchDir = Path.Combine(Path.GetTempPath(), "TenzoraXUpdate");
-            Directory.CreateDirectory(batchDir);
-            string batchPath = Path.Combine(batchDir, "update.bat");
+            string tempDir = Path.Combine(Path.GetTempPath(), "TenzoraXUpdate");
+            Directory.CreateDirectory(tempDir);
+            string scriptPath = Path.Combine(tempDir, "update.ps1");
+            string logPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "TenzoraX", "Logs", "update.log");
             string targetDir = Path.GetDirectoryName(currentExe) ?? "";
 
-            string batchContent = $@"@echo off
-setlocal
-set ""target={currentExe}""
-set ""newExe={newExePath}""
-set ""pid={pid}""
-set ""dir={targetDir}""
-
-:wait
-%SystemRoot%\System32\tasklist.exe /FI ""PID eq %pid%"" 2>nul | %SystemRoot%\System32\findstr.exe /I ""%pid%"" >nul
-if not errorlevel 1 (
-    %SystemRoot%\System32\timeout.exe /t 1 /nobreak >nul
-    goto wait
-)
-
-%SystemRoot%\System32\timeout.exe /t 1 /nobreak >nul
-
-:: Delete any leftover .old.exe from old update code
-%SystemRoot%\System32\del.exe /F /Q ""%dir%\TenzoraX.old.exe"" >nul 2>&1
-
-%SystemRoot%\System32\del.exe /F /Q ""%target%"" >nul 2>&1
-%SystemRoot%\System32\copy.exe /Y ""%newExe%"" ""%target%"" >nul 2>&1
-
-start """" /D ""{targetDir}"" ""%target%""
-
-%SystemRoot%\System32\del.exe /F /Q ""%~f0"" >nul 2>&1
+            string script = $@"param()
+$log = ""{logPath}""
+$old = ""{currentExe}""
+$new = ""{newExePath}""
+$targetPid = {pid}
+function Log {{ param($m) $e = ""[$(Get-Date -Format 'HH:mm:ss')] $m""; Add-Content -Path $log -Value $e }}
+Log ""Update gestartet""
+Log ""Warte auf PID $targetPid ...""
+while ((Get-Process -Id $targetPid -ErrorAction SilentlyContinue) -ne $null) {{ Start-Sleep -Seconds 1 }}
+Start-Sleep -Seconds 1
+Log ""Prozess beendet""
+Log ""Lösche alte Datei: $old""
+Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
+Log ""Kopiere neue Datei: $new -> $old""
+Copy-Item -LiteralPath $new -Destination $old -Force
+if (Test-Path $old) {{ Log ""Neue Datei vorhanden""; Start-Process -FilePath $old; Log ""Neue Version gestartet"" }} else {{ Log ""FEHLER: Neue Datei nicht gefunden!"" }}
+Remove-Item -LiteralPath ""$env:TEMP\TenzoraXUpdate"" -Recurse -Force -ErrorAction SilentlyContinue
+Log ""Update abgeschlossen""
 ";
-
-            File.WriteAllText(batchPath, batchContent);
+            File.WriteAllText(scriptPath, script);
+            App.LogApp($"Update-Skript erstellt: {scriptPath}");
 
             var psi = new ProcessStartInfo
             {
-                FileName = "cmd.exe",
-                Arguments = $"/c \"{batchPath}\"",
+                FileName = "powershell.exe",
+                Arguments = $"-ExecutionPolicy Bypass -NoProfile -File \"{scriptPath}\"",
                 CreateNoWindow = true,
-                UseShellExecute = false
+                UseShellExecute = false,
+                WindowStyle = ProcessWindowStyle.Hidden
             };
-
             Process.Start(psi);
+            App.LogApp("Updater-Prozess gestartet – TenzoraX wird beendet");
             Environment.Exit(0);
         }
 
