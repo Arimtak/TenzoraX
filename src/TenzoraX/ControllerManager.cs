@@ -96,7 +96,7 @@ namespace TenzoraX
         private static extern int joyGetNumDevs();
 
         [DllImport("winmm.dll")]
-        private static extern int joyGetDevCapsW(IntPtr uJoyID, out JOYCAPSW pjc, int cbjc);
+        private static extern int joyGetDevCapsW(uint uJoyID, out JOYCAPSW pjc, int cbjc);
 
         [DllImport("winmm.dll")]
         private static extern int joyGetPosEx(uint uJoyID, out JOYINFOEX pji);
@@ -119,19 +119,16 @@ namespace TenzoraX
             public int wYmax;
             public int wZmin;
             public int wZmax;
-            public int wNumButtons;
-            public int wPeriodMin;
-            public int wPeriodMax;
             public int wRmin;
             public int wRmax;
             public int wUmin;
             public int wUmax;
             public int wVmin;
             public int wVmax;
-            public int wCaps;
-            public int wMaxAxes;
-            public int wNumAxes;
-            public int wMaxButtons;
+            public uint wCaps;
+            public ushort wMaxAxes;
+            public ushort wNumAxes;
+            public ushort wMaxButtons;
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
             public string szRegKey;
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
@@ -197,6 +194,12 @@ namespace TenzoraX
         private int _selectedIndex = 0;
         private int _winmmCount = 0;
 
+        // Cooldown per slot after a disconnect: avoid native API calls (xinput/winmm)
+        // while the driver is still tearing the device down (heap corruption risk).
+        private static readonly TimeSpan DisconnectCooldown = TimeSpan.FromMilliseconds(1500);
+        private readonly Dictionary<int, DateTime> _xinputCooldownUntil = new();
+        private readonly Dictionary<int, DateTime> _winmmCooldownUntil = new();
+
         public event EventHandler<ControllerStateEventArgs>? StateChanged;
         public event EventHandler? GamepadsChanged;
 
@@ -256,8 +259,15 @@ namespace TenzoraX
         public void Shutdown()
         {
             _isRunning = false;
+            var thread = _pollThread;
             _pollThread = null;
+            if (thread != null && thread.IsAlive)
+            {
+                try { thread.Join(2000); } catch { }
+            }
             lock (_controllers) { _controllers.Clear(); }
+            _xinputCooldownUntil.Clear();
+            _winmmCooldownUntil.Clear();
             App.LogApp("Controller-System gestoppt");
         }
 
@@ -364,6 +374,7 @@ namespace TenzoraX
             int xinputFound = 0;
             for (int i = 0; i < 4; i++)
             {
+                if (InCooldown(_xinputCooldownUntil, i)) continue;
                 uint rc = XInputGetState((uint)i, out _);
                 bool connected = (rc == ERROR_SUCCESS);
                 if (connected) xinputFound++;
@@ -387,6 +398,7 @@ namespace TenzoraX
             // XInput first
             for (int i = 0; i < 4; i++)
             {
+                if (InCooldown(_xinputCooldownUntil, i)) continue;
                 uint rc = XInputGetState((uint)i, out _);
                 bool connected = (rc == ERROR_SUCCESS);
                 if (connected)
@@ -406,7 +418,8 @@ namespace TenzoraX
             {
                 try
                 {
-                    int rc = joyGetDevCapsW((IntPtr)i, out JOYCAPSW caps, Marshal.SizeOf<JOYCAPSW>());
+                    if (InCooldown(_winmmCooldownUntil, i)) continue;
+                    int rc = joyGetDevCapsW((uint)i, out JOYCAPSW caps, Marshal.SizeOf<JOYCAPSW>());
                     if (rc == JOYERR_NOERROR)
                     {
                         string name = caps.szPname.Trim();
@@ -455,15 +468,24 @@ namespace TenzoraX
             }
         }
 
+        private static bool InCooldown(Dictionary<int, DateTime> cooldowns, int slot)
+        {
+            return cooldowns.TryGetValue(slot, out var until) && DateTime.UtcNow < until;
+        }
+
         // ============================================================
         //  READ XINPUT CONTROLLER
         // ============================================================
 
         private void ReadXInput(ControllerInfo ctrl)
         {
+            // Skip polling a slot that recently disconnected (driver teardown in progress)
+            if (InCooldown(_xinputCooldownUntil, ctrl.SlotIndex)) return;
+
             var rc = XInputGetState((uint)ctrl.SlotIndex, out var state);
             if (rc != ERROR_SUCCESS)
             {
+                _xinputCooldownUntil[ctrl.SlotIndex] = DateTime.UtcNow + DisconnectCooldown;
                 if (ctrl.Connected)
                 {
                     ctrl.Connected = false;
@@ -490,6 +512,7 @@ namespace TenzoraX
                 App.LogApp("XInput-Controller verbunden: Slot " + ctrl.SlotIndex);
                 try { GamepadsChanged?.Invoke(this, EventArgs.Empty); } catch { }
             }
+            _xinputCooldownUntil.Remove(ctrl.SlotIndex);
 
             var g = state.Gamepad;
             var w = g.wButtons;
@@ -572,6 +595,9 @@ namespace TenzoraX
         {
             try
             {
+                // Skip polling a slot that recently disconnected (driver teardown in progress)
+                if (InCooldown(_winmmCooldownUntil, ctrl.SlotIndex)) return;
+
                 var joyInfo = new JOYINFOEX();
                 joyInfo.dwSize = Marshal.SizeOf<JOYINFOEX>();
                 joyInfo.dwFlags = JOY_RETURNALL | JOY_RETURNPOVCTS;
@@ -579,6 +605,7 @@ namespace TenzoraX
                 int rc = joyGetPosEx((uint)ctrl.SlotIndex, out joyInfo);
                 if (rc != JOYERR_NOERROR)
                 {
+                    _winmmCooldownUntil[ctrl.SlotIndex] = DateTime.UtcNow + DisconnectCooldown;
                     if (ctrl.Connected)
                     {
                         ctrl.Connected = false;
@@ -605,6 +632,7 @@ namespace TenzoraX
                     App.LogApp("WinMM-Controller verbunden: Slot " + ctrl.SlotIndex);
                     try { GamepadsChanged?.Invoke(this, EventArgs.Empty); } catch { }
                 }
+                _winmmCooldownUntil.Remove(ctrl.SlotIndex);
 
                 var pressed = new List<string>();
                 uint b = joyInfo.dwButtons;
@@ -647,7 +675,7 @@ namespace TenzoraX
                 int zMin = 0, zMax = 65535;
                 try
                 {
-                    joyGetDevCapsW((IntPtr)ctrl.SlotIndex, out JOYCAPSW caps, Marshal.SizeOf<JOYCAPSW>());
+                    joyGetDevCapsW((uint)ctrl.SlotIndex, out JOYCAPSW caps, Marshal.SizeOf<JOYCAPSW>());
                     xMin = caps.wXmin; xMax = caps.wXmax;
                     yMin = caps.wYmin; yMax = caps.wYmax;
                     rMin = caps.wRmin; rMax = caps.wRmax;

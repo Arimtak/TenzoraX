@@ -98,6 +98,9 @@ namespace TenzoraX
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
         private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
+        [DllImport("user32.dll")]
+        private static extern bool DestroyIcon(IntPtr hIcon);
+
         private NotifyIcon? _notifyIcon;
         private bool _isExplicitClose = false;
         private AppSettings _settings = new();
@@ -141,7 +144,17 @@ namespace TenzoraX
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             {
                 if (e.ExceptionObject is Exception ex)
+                {
+                    // Ignore CRT shutdown noise from single-file publish (same filter as App.xaml.cs)
+                    if (ex is DllNotFoundException &&
+                        ex.StackTrace != null &&
+                        (ex.StackTrace.Contains("__std_type_info_destroy_list") ||
+                         ex.StackTrace.Contains("__scrt_uninitialize_type_info") ||
+                         ex.StackTrace.Contains("_app_exit_callback")))
+                        return;
+
                     LogCrash("Unhandled", ex);
+                }
             };
             Dispatcher.UnhandledException += (s, e) =>
             {
@@ -1053,14 +1066,16 @@ namespace TenzoraX
             if (intPercent == _batteryLastIconPercent) return;
             _batteryLastIconPercent = intPercent;
 
-            // Dispose old battery icon
-            if (_batteryIcon != null)
+            // Replace icon: assign the new one first, then dispose the old one
+            // (never dispose an icon while NotifyIcon still references it)
+            var newIcon = LoadBatteryIcon(percent);
+            var oldIcon = _batteryIcon;
+            _batteryIcon = newIcon;
+            _notifyIcon.Icon = newIcon;
+            if (oldIcon != null)
             {
-                try { _batteryIcon.Dispose(); } catch { }
+                try { oldIcon.Dispose(); } catch { }
             }
-
-            _batteryIcon = LoadBatteryIcon(percent);
-            _notifyIcon.Icon = _batteryIcon;
         }
 
         private System.Drawing.Icon? _batteryIcon;
@@ -1084,8 +1099,16 @@ namespace TenzoraX
                     using (var bitmap = new System.Drawing.Bitmap(stream))
                     {
                         var hIcon = bitmap.GetHicon();
-                        var icon = System.Drawing.Icon.FromHandle(hIcon);
-                        return (System.Drawing.Icon)icon.Clone();
+                        try
+                        {
+                            // Clone copies the handle before the bitmap disposes it; original is released explicitly
+                            var clone = System.Drawing.Icon.FromHandle(hIcon).Clone();
+                            return (System.Drawing.Icon)clone;
+                        }
+                        finally
+                        {
+                            DestroyIcon(hIcon);
+                        }
                     }
                 }
             }
@@ -1835,8 +1858,16 @@ namespace TenzoraX
                 g.FillRectangle(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(40, 40, 50)), 4, 10, 24, 14);
                 g.FillEllipse(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(0, 210, 255)), 12, 14, 8, 8);
                 var hIcon = bmp.GetHicon();
-                var icon = System.Drawing.Icon.FromHandle(hIcon);
-                return (System.Drawing.Icon)icon.Clone();
+                try
+                {
+                    // Clone copies the handle before the bitmap disposes it; original is released explicitly
+                    var clone = System.Drawing.Icon.FromHandle(hIcon).Clone();
+                    return (System.Drawing.Icon)clone;
+                }
+                finally
+                {
+                    DestroyIcon(hIcon);
+                }
             }
         }
 
@@ -1849,22 +1880,30 @@ namespace TenzoraX
                 if (streamInfo != null)
                 {
                     using (var stream = streamInfo.Stream)
+                    using (var icon = new System.Drawing.Icon(stream))
                     {
-                        var icon = new System.Drawing.Icon(stream);
                         return Imaging.CreateBitmapSourceFromHIcon(icon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
                     }
                 }
             }
             catch { }
             // Fallback: draw a simple placeholder
-            var bmp = new System.Drawing.Bitmap(32, 32);
+            using (var bmp = new System.Drawing.Bitmap(32, 32))
             using (var g = System.Drawing.Graphics.FromImage(bmp))
             {
                 g.Clear(System.Drawing.Color.Transparent);
                 g.FillRectangle(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(40, 40, 50)), 4, 10, 24, 14);
                 g.FillEllipse(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(0, 210, 255)), 12, 14, 8, 8);
+                var hIcon = bmp.GetHicon();
+                try
+                {
+                    return Imaging.CreateBitmapSourceFromHIcon(hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                }
+                finally
+                {
+                    DestroyIcon(hIcon);
+                }
             }
-            return Imaging.CreateBitmapSourceFromHIcon(bmp.GetHicon(), Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
         }
 
         private void HideToTray(bool showTip)
