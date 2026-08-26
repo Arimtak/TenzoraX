@@ -13,6 +13,9 @@ namespace TenzoraX
         private bool _isDragging;
         private System.Windows.Point _dragStart;
 
+        /// <summary>true, wenn der Nutzer diese Benachrichtigung gezogen hat (Position dann merken).</summary>
+        public bool WasDragged { get; private set; }
+
         public NotificationWindow(string combo, string action, double duration, double width)
         {
             try
@@ -28,6 +31,12 @@ namespace TenzoraX
 
             TxtCombo.Text = combo;
             TxtAction.Text = action;
+            if (string.IsNullOrEmpty(combo))
+            {
+                // Text-Aktion: nur den ausgelösten Text zeigen, nicht die Knopfdrucklage
+                TxtCombo.Visibility = System.Windows.Visibility.Collapsed;
+                TxtArrow.Visibility = System.Windows.Visibility.Collapsed;
+            }
             _duration = duration;
 
             MouseDown += OnMouseDown;
@@ -78,6 +87,7 @@ namespace TenzoraX
             if (_isDragging)
             {
                 _isDragging = false;
+                WasDragged = true;
                 ReleaseMouseCapture();
             }
         }

@@ -23,10 +23,10 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="⌨" FontSize="18" VerticalAlignment="Center" Margin="0,0,10,0"/>
                 <StackPanel Grid.Column="1">
-                    <TextBlock x:Name="TxtCombo" FontWeight="SemiBold" FontSize="15" Foreground="{StaticResource TextBrush}"/>
+                    <TextBlock x:Name="TxtCombo" FontWeight="SemiBold" FontSize="15" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap"/>
                     <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                        <TextBlock Text="→" FontSize="16" Foreground="#10B981" FontWeight="Bold"/>
-                        <TextBlock x:Name="TxtAction" FontWeight="Bold" FontSize="15" Foreground="#10B981" Margin="8,0,0,0"/>
+                        <TextBlock x:Name="TxtArrow" Text="→" FontSize="16" Foreground="#10B981" FontWeight="Bold"/>
+                        <TextBlock x:Name="TxtAction" FontWeight="Bold" FontSize="15" Foreground="#10B981" Margin="8,0,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </StackPanel>
             </Grid>

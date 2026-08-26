@@ -6,12 +6,20 @@ namespace TenzoraX
 {
     public static class NotificationManager
     {
+        public const string CornerTopRight = "TopRight";
+        public const string CornerTopLeft = "TopLeft";
+        public const string CornerBottomRight = "BottomRight";
+        public const string CornerBottomLeft = "BottomLeft";
+
         private static readonly List<NotificationWindow> _activeNotifications = new();
         private static bool _enabled = true;
         private static double _duration = 5.0;
         private static double _savedWidth = 360;
         private static double _savedPosX = -1;
         private static double _savedPosY = -1;
+
+        /// <summary>Anker-Ecke der Benachrichtigung (aus den Einstellungen).</summary>
+        public static string Corner { get; set; } = CornerTopRight;
 
         public static bool Enabled
         {
@@ -43,6 +51,13 @@ namespace TenzoraX
             set => _savedPosY = value;
         }
 
+        /// <summary>Setzt die benutzerdefinierte Drag-Position zurück, damit wieder die Ecke gilt.</summary>
+        public static void ResetSavedPosition()
+        {
+            _savedPosX = -1;
+            _savedPosY = -1;
+        }
+
         public static void Show(string combo, string action)
         {
             if (!_enabled) return;
@@ -63,39 +78,21 @@ namespace TenzoraX
                 notification.Show();
                 notification.Opacity = 0;
 
-                double notifHeight = Math.Max(notification.ActualHeight, 70);
-
-                double left, top;
-
-                if (_savedPosX >= workArea.Left && _savedPosX + notifWidth <= workArea.Right &&
-                    _savedPosY >= workArea.Top && _savedPosY + notifHeight <= workArea.Bottom)
-                {
-                    left = _savedPosX;
-                    top = _savedPosY;
-                }
-                else
-                {
-                    left = workArea.Left + 16;
-                    top = workArea.Top + (workArea.Height - notifHeight) / 2;
-                }
-
-                var visible = _activeNotifications.Where(n => n.IsVisible).ToList();
-                double totalStackH = visible.Sum(n => Math.Max(n.ActualHeight, 70) + 8);
-                top -= totalStackH;
-                if (top < workArea.Top + 4) top = workArea.Top + 4;
-
-                notification.Top = top;
-                notification.Left = left;
-
                 notification.Closed += (s, e) =>
                 {
                     _activeNotifications.Remove(notification);
-                    _savedPosX = notification.Left;
-                    _savedPosY = notification.Top;
+                    // Nur wenn der Nutzer die Benachrichtigung wirklich gezogen hat,
+                    // wird die Position gespeichert – sonst gilt weiterhin die Ecke.
+                    if (notification.WasDragged)
+                    {
+                        _savedPosX = notification.Left;
+                        _savedPosY = notification.Top;
+                    }
                     try { RepositionAll(); } catch { }
                 };
 
                 _activeNotifications.Add(notification);
+                RepositionAll();
                 notification.BeginAnimation();
             }
             catch (Exception ex)
@@ -114,23 +111,55 @@ namespace TenzoraX
             }
         }
 
+        /// <summary>
+        /// Positioniert alle sichtbaren Benachrichtigungen: die neueste an der
+        /// gewählten Ecke (bzw. der gespeicherten Drag-Position), ältere daneben
+        /// untereinander – oben nach unten, unten nach oben gestapelt.
+        /// </summary>
         private static void RepositionAll()
         {
-            var visible = _activeNotifications.Where(n => n.IsVisible).ToList();
-            if (visible.Count == 0) return;
-
             var primary = GetPrimaryScreen();
             if (primary == null) return;
 
+            var visible = _activeNotifications.Where(n => n.IsVisible).ToList();
+            if (visible.Count == 0) return;
+
             var workArea = primary.WorkingArea;
-            double totalStackH = visible.Sum(n => Math.Max(n.ActualHeight, 70) + 8);
-            double startY = workArea.Top + (workArea.Height - totalStackH) / 2;
-            if (startY < workArea.Top + 4) startY = workArea.Top + 4;
+            double notifWidth = Math.Clamp(_savedWidth, 250, workArea.Width - 40);
+
+            // Gespeicherte Drag-Position (falls gültig): benutzerdefinierter Anker
+            double firstH = Math.Max(visible[0].ActualHeight, 70);
+            bool useSaved = _savedPosX >= workArea.Left && _savedPosX + notifWidth <= workArea.Right &&
+                            _savedPosY >= workArea.Top && _savedPosY + firstH <= workArea.Bottom;
+
+            const double margin = 16;
+            const double gap = 8;
+
+            // Neueste zuerst (zuletzt hinzugefügt) – sie sitzt am Anker
+            visible.Reverse();
+
+            bool topAnchor = Corner is CornerTopLeft or CornerTopRight;
+            double y = useSaved
+                ? _savedPosY
+                : topAnchor ? workArea.Top + margin : workArea.Bottom - margin;
+            int dir = topAnchor ? 1 : -1;
 
             foreach (var n in visible)
             {
-                try { n.AnimateTop(startY); } catch { }
-                startY += Math.Max(n.ActualHeight, 70) + 8;
+                double h = Math.Max(n.ActualHeight, 70);
+                double left = useSaved
+                    ? _savedPosX
+                    : (Corner == CornerBottomLeft || Corner == CornerTopLeft)
+                        ? workArea.Left + margin
+                        : workArea.Right - notifWidth - margin;
+
+                try
+                {
+                    n.Left = left;
+                    n.Top = dir > 0 ? y : y - h;
+                }
+                catch { }
+                y += dir * (h + gap);
             }
         }
     }

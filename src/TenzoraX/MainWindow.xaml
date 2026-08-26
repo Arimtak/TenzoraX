@@ -82,6 +82,57 @@
         <local:MappingPartTemplateSelector x:Key="MappingPartSelector"
             ButtonTemplate="{StaticResource KeycapButtonTemplate}"
             SeparatorTemplate="{StaticResource KeycapSeparatorTemplate}"/>
+
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+
+        <!-- Dark TabControl / TabItem Styles -->
+        <Style x:Key="DarkTabControlStyle" TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <TabPanel x:Name="HeaderPanel" IsItemsHost="True" Background="Transparent" Margin="0,0,0,6"/>
+                            <Border Grid.Row="1" Background="Transparent" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8">
+                                <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent"/>
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DarkTabItemStyle" TargetType="TabItem">
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+            <Setter Property="Background" Value="#16161E"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="12,5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Margin="0,0,4,0" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" TargetName="Bd" Value="#0E2A35"/>
+                                <Setter Property="BorderBrush" TargetName="Bd" Value="{StaticResource AccentBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid Margin="10">
@@ -101,10 +152,23 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="TenzoraX" FontSize="13" FontWeight="Bold" Foreground="#FFFFFF" VerticalAlignment="Center"/>
                 <TextBlock x:Name="TxtVersionHeader" Grid.Column="1" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <Button x:Name="BtnSettings" Grid.Column="2" Content="⚙" Click="BtnSettings_Click" Width="28" Height="24" Padding="0" FontSize="14" Background="Transparent" BorderThickness="0" Foreground="{StaticResource MutedTextBrush}" Cursor="Hand"/>
+                <!-- Klickbares Controller-Icon: öffnet das Windows-Fenster "Game Controller"
+                     (joy.cpl) mit allen installierten Controllern – dort lassen sich die
+                     Controller testen und konfigurieren. -->
+                <Button x:Name="BtnControllerHistoryHeader" Grid.Column="2" Click="BtnOpenGameControllersMain_Click" Width="28" Height="24" Padding="0" Background="Transparent" BorderThickness="0" Cursor="Hand" ToolTip="{Binding Vigem_OpenControllers}">
+                    <Image Source="pack://application:,,,/assets/icons/video-game-gamepad-icon_ico_32x32.ico" Width="18" Height="18" Stretch="Uniform"/>
+                </Button>
+                <!-- Treiber-Status-Licht: grün = ViGEmBus + HidHide installiert, rot = fehlen.
+                     Klick: fehlende Treiber herunterladen und installieren. -->
+                <Button x:Name="BtnDriversHeader" Grid.Column="3" Click="BtnDriversHeader_Click" Width="28" Height="24" Padding="0" Background="Transparent" BorderThickness="0" Cursor="Hand" ToolTip="{Binding Drivers_HeaderTooltip}">
+                    <Ellipse x:Name="DriversStatusDotHeader" Width="16" Height="16" Fill="#64748B" Stroke="{StaticResource AccentBrush}" StrokeThickness="1.5"/>
+                </Button>
+                <Button x:Name="BtnSettings" Grid.Column="4" Content="⚙" Click="BtnSettings_Click" Width="28" Height="24" Padding="0" FontSize="14" Background="Transparent" BorderThickness="0" Foreground="{StaticResource MutedTextBrush}" Cursor="Hand"/>
             </Grid>
         </Border>
 
@@ -121,6 +185,7 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
@@ -133,23 +198,31 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel Orientation="Horizontal" Grid.Column="0" VerticalAlignment="Center">
                             <TextBlock Text="🎮" FontSize="18" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                            <ComboBox x:Name="ComboGamepads" Width="240" SelectionChanged="ComboGamepads_SelectionChanged" VerticalAlignment="Center" Height="26"/>
+                            <ComboBox x:Name="ComboGamepads" Width="240" SelectionChanged="ComboGamepads_SelectionChanged" PreviewKeyDown="ComboGamepads_PreviewKeyDown" VerticalAlignment="Center" Height="26"/>
+                            <Button x:Name="BtnControllerHistory" Content="🕘" Width="26" Height="26" Margin="6,0,0,0" Padding="0" FontSize="11" ToolTip="{Binding History_Button}" Click="BtnControllerHistory_Click"/>
+                            <Button x:Name="BtnDiagnostics" Content="🔍" Width="26" Height="26" Margin="6,0,0,0" Padding="0" FontSize="11" ToolTip="{Binding Diag_Button}" Click="BtnDiagnostics_Click"/>
                         </StackPanel>
                         
                         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="{Binding Status_Label}" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11"/>
-                            <TextBlock x:Name="TxtStatus" Text="{Binding Status_Connected}" Foreground="#10B981" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,14,0" FontSize="11"/>
-                            
                             <TextBlock Text="{Binding Battery_Label}" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11"/>
                             <Border x:Name="BatteryIndicator" Width="24" Height="12" CornerRadius="6" Background="#4A4A4A" Margin="0,0,4,0">
                                 <Border x:Name="BatteryLevel" Width="22" Height="10" CornerRadius="5" Background="#10B981" HorizontalAlignment="Left" Margin="1,1,0,1"/>
                             </Border>
                             <TextBlock x:Name="TxtBattery" Text="100%" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" VerticalAlignment="Center" FontSize="11"/>
+                            <TextBlock x:Name="TxtBatteryWarning" Text="{Binding Battery_Low}" Foreground="#F59E0B" FontWeight="Bold" VerticalAlignment="Center" FontSize="10" Margin="6,0,0,0" Visibility="Collapsed"/>
                         </StackPanel>
                     </Grid>
 
+                    <!-- Live-Eingabe-Anzeige: zeigt in Echtzeit, welche Tasten/Achsen
+                         gerade vom aktiven Controller gelesen werden (ohne Diagnose). -->
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,6">
+                        <Ellipse x:Name="LiveActivityDot" Width="8" Height="8" Fill="#4A4A4A" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock x:Name="TxtLiveButtons" Foreground="{StaticResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" Text="—"/>
+                        <TextBlock x:Name="TxtLiveAxes" Foreground="{StaticResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" Margin="14,0,0,0" Text="—"/>
+                    </StackPanel>
+
                     <!-- Gamepad Visual Interface with Background Image -->
-                    <Border Grid.Row="1" Background="Transparent" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                    <Border Grid.Row="2" Background="Transparent" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
                         <Canvas x:Name="CanvasGamepad" ClipToBounds="True" Background="Transparent" MouseDown="CanvasGamepad_MouseDown" KeyDown="CanvasGamepad_KeyDown" Focusable="True">
                             <!-- Controller Background Image -->
                             <Image x:Name="ImgController" Source="pack://application:,,,/assets/icons/xbox-360.png" Stretch="Uniform"/>
@@ -317,23 +390,23 @@
                             <TextBlock Text="{Binding KB_NumPad}" Style="{StaticResource SectionLabelStyle}"/>
                             <Border Background="#0A1218" BorderBrush="#1A3A4A" BorderThickness="1" CornerRadius="5" Padding="6,3" Margin="0,1,0,2">
                                 <UniformGrid Columns="4" Rows="5">
-                                    <Button Content="NumLock" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="8" Height="20"/>
-                                    <Button Content="Num /" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="Num *" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="Num -" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="7" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="8" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="9" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="+" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="4" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="5" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="6" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="NumLock" Tag="NUMLOCK" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="8" Height="20"/>
+                                    <Button Content="Num /" Tag="NUMPAD_DIV" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="Num *" Tag="NUMPAD_MUL" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="Num -" Tag="NUMPAD_MINUS" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="7" Tag="NUMPAD_7" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="8" Tag="NUMPAD_8" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="9" Tag="NUMPAD_9" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="+" Tag="NUMPAD_PLUS" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="4" Tag="NUMPAD_4" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="5" Tag="NUMPAD_5" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="6" Tag="NUMPAD_6" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
                                     <Border/>
-                                    <Button Content="1" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="2" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="3" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="." Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="0" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="1" Tag="NUMPAD_1" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="2" Tag="NUMPAD_2" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="3" Tag="NUMPAD_3" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="." Tag="NUMPAD_DOT" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
+                                    <Button Content="0" Tag="NUMPAD_0" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
                                     <Border/>
                                     <Border/>
                                     <Border/>
@@ -406,6 +479,11 @@
                             <Button Content="✕" Click="BtnClearAction_Click" Grid.Column="1" Margin="6,0,0,0" Height="24" Width="24" Padding="0" FontSize="10"/>
                         </Grid>
 
+                        <TextBlock Text="{Binding Mapping_NameLabel}" FontSize="10" Foreground="{StaticResource MutedTextBrush}"/>
+                        <Border Background="#1E1E26" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="5" Padding="6,4" Margin="0,4,0,8">
+                            <TextBox x:Name="TxtMappingName" FontSize="11" Background="Transparent" BorderThickness="0" Foreground="White" VerticalContentAlignment="Center" ToolTip="{Binding Mapping_NameHint}"/>
+                        </Border>
+
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -426,49 +504,90 @@
                     </StackPanel>
                 </Border>
 
-                <Grid Grid.Row="2" Margin="0,0,0,6">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <TextBlock Grid.Row="0" Text="{Binding Mapping_ListTitle}" FontWeight="Bold" FontSize="13" Margin="0,0,0,6"/>
-                    <Border Grid.Row="1" Background="#0D0D12" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
-                        <ListBox x:Name="ListMappings" Background="Transparent" BorderThickness="0" Margin="4">
+                <TabControl x:Name="TabsRightPanel" Grid.Row="2" Style="{StaticResource DarkTabControlStyle}" SelectionChanged="TabsRightPanel_SelectionChanged">
+                    <TabItem Header="{Binding Tabs_Combinations}" Style="{StaticResource DarkTabItemStyle}">
+                        <Border Background="#0D0D12" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
+                            <ListBox x:Name="ListMappings" Background="Transparent" BorderThickness="0" Margin="4" SelectionChanged="ListMappings_SelectionChanged">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
                                     <Border Background="#1A1A24" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10,7" Margin="0,3">
                                         <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <ItemsControl ItemsSource="{Binding ComboParts}" ItemTemplateSelector="{StaticResource MappingPartSelector}" Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Center">
-                                                <ItemsControl.ItemsPanel>
-                                                    <ItemsPanelTemplate>
-                                                        <StackPanel Orientation="Horizontal"/>
-                                                    </ItemsPanelTemplate>
-                                                </ItemsControl.ItemsPanel>
-                                            </ItemsControl>
-                                            <TextBlock Text="➔" Foreground="{StaticResource AccentBrush}" Margin="6,0" Grid.Column="1" VerticalAlignment="Center" FontSize="15"/>
-                                            <ItemsControl ItemsSource="{Binding ActionParts}" ItemTemplateSelector="{StaticResource MappingPartSelector}" Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Center">
-                                                <ItemsControl.ItemsPanel>
-                                                    <ItemsPanelTemplate>
-                                                        <StackPanel Orientation="Horizontal"/>
-                                                    </ItemsPanelTemplate>
-                                                </ItemsControl.ItemsPanel>
-                                            </ItemsControl>
-                                            <Button Content="✕" Click="BtnDeleteMapping_Click" Tag="{Binding}" Background="Transparent" Foreground="#EF4444" BorderThickness="0" Grid.Column="3" Padding="4,2" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="13"/>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid Grid.Row="0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <ItemsControl ItemsSource="{Binding ComboParts}" ItemTemplateSelector="{StaticResource MappingPartSelector}" Grid.Column="0" VerticalAlignment="Center">
+                                                    <ItemsControl.ItemsPanel>
+                                                        <ItemsPanelTemplate>
+                                                            <StackPanel Orientation="Horizontal"/>
+                                                        </ItemsPanelTemplate>
+                                                    </ItemsControl.ItemsPanel>
+                                                </ItemsControl>
+                                                <TextBlock Text="➔" Foreground="{StaticResource AccentBrush}" Margin="6,0" Grid.Column="1" VerticalAlignment="Center" FontSize="15"/>
+                                                <ItemsControl ItemsSource="{Binding ActionParts}" ItemTemplateSelector="{StaticResource MappingPartSelector}" Grid.Column="2" VerticalAlignment="Center" Visibility="{Binding HasActionOutput, Converter={StaticResource BoolToVis}}">
+                                                    <ItemsControl.ItemsPanel>
+                                                        <ItemsPanelTemplate>
+                                                            <StackPanel Orientation="Horizontal"/>
+                                                        </ItemsPanelTemplate>
+                                                    </ItemsControl.ItemsPanel>
+                                                </ItemsControl>
+                                                <Button Content="✕" Click="BtnDeleteMapping_Click" Tag="{Binding}" Background="Transparent" Foreground="#EF4444" BorderThickness="0" Grid.Column="4" Padding="4,2" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="13"/>
+                                            </Grid>
+                                            <TextBlock Grid.Row="1" Text="{Binding ActionName}" TextWrapping="Wrap" FontWeight="SemiBold" FontSize="12" Foreground="White" Margin="0,5,0,0" Visibility="{Binding HasName, Converter={StaticResource BoolToVis}}"/>
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
-                        </ListBox>
-                    </Border>
-                </Grid>
+                            </ListBox>
+                        </Border>
+                    </TabItem>
+                    <TabItem x:Name="TabController" Header="{Binding Tabs_Controller}" Style="{StaticResource DarkTabItemStyle}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
 
-                <ScrollViewer Grid.Row="3" MaxHeight="100" VerticalScrollBarVisibility="Auto" Margin="0,2,0,0">
+                    <TextBlock Text="{Binding Vigem_Section}" FontSize="11" FontWeight="Bold" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,4" TextWrapping="Wrap"/>
+
+                    <CheckBox x:Name="ChkVigemXboxMain" Content="{Binding Vigem_EnableTitle}" Checked="ChkVigemXboxMain_Changed" Unchecked="ChkVigemXboxMain_Changed" FontWeight="SemiBold" Foreground="White" FontSize="10" Margin="0,0,0,4"/>
+                    <Border Background="#101319" CornerRadius="5" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="8,6" Margin="0,0,0,8">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="VigemStatusDotMain" Width="9" Height="9" Fill="#64748B" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock x:Name="TxtVigemStatusMain" Text="" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Button x:Name="BtnCheckDrivers" Content="{Binding Drivers_CheckButton}" Click="BtnCheckDrivers_Click" Height="26" Padding="10,1" FontSize="9" Foreground="{StaticResource AccentBrush}" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" Margin="0,0,0,4" HorizontalAlignment="Left"/>
+                    <Button x:Name="BtnInstallHidhideMain" Content="{Binding Hidhide_Install}" Click="BtnInstallHidhideMain_Click" Height="26" Padding="10,1" FontSize="9" Foreground="{StaticResource AccentBrush}" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" Margin="0,0,0,4" HorizontalAlignment="Left"/>
+                    <Button x:Name="BtnOpenGameControllersMain" Content="{Binding Vigem_OpenControllers}" Click="BtnOpenGameControllersMain_Click" Height="26" Padding="10,1" FontSize="9" Foreground="{StaticResource AccentBrush}" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" Margin="0,0,0,8" HorizontalAlignment="Left"/>
+
+                    <TextBlock Text="{Binding Hidhide_Title}" FontSize="11" FontWeight="Bold" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                    <Border Background="#101319" CornerRadius="5" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="8,6" Margin="0,0,0,6">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="HidhideStatusDotMain" Width="9" Height="9" Fill="#64748B" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock x:Name="TxtHidhideStatusMain" Text="" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+                    <Button x:Name="BtnOpenHidhideClient" Content="{Binding Hidhide_OpenClient}" Click="BtnOpenHidhideClient_Click" Height="26" Padding="10,1" FontSize="9" Foreground="{StaticResource AccentBrush}" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" Margin="0,0,0,8" HorizontalAlignment="Left"/>
+
+                    <TextBlock Text="{Binding Hidhide_StepHeader}" FontSize="9" FontWeight="SemiBold" Foreground="#FFFFFF" Margin="0,0,0,3"/>
+                    <TextBlock Text="{Binding Hidhide_Step1}" FontSize="9" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="8,0,0,2"/>
+                    <TextBlock Text="{Binding Hidhide_Step2}" FontSize="9" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="8,0,0,2"/>
+                    <TextBlock Text="{Binding Hidhide_Step3}" FontSize="9" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="8,0,0,2"/>
+                    <TextBlock Text="{Binding Hidhide_Note}" FontSize="9" Foreground="#F59E0B" TextWrapping="Wrap" Margin="8,0,0,0"/>
+
+                        </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+                </TabControl>
+
+                <ScrollViewer Grid.Row="3" MaxHeight="120" VerticalScrollBarVisibility="Auto" Margin="0,2,0,0">
                 <StackPanel>
                     <Separator Background="{StaticResource BorderBrush}" Margin="0,0,0,6"/>
                     <CheckBox x:Name="ChkEditMode" Content="{Binding Edit_ModeEnabled}" Checked="ChkEditMode_Checked" Unchecked="ChkEditMode_Checked" FontWeight="SemiBold" Margin="0,0,0,4" Foreground="White"/>
@@ -484,20 +603,6 @@
                         </StackPanel>
                         <TextBlock Text="{Binding Edit_Tip}" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" FontSize="9"/>
                     </StackPanel>
-                    <CheckBox x:Name="ChkAutostart" Content="{Binding Edit_Autostart}" Checked="ChkAutostart_Changed" Unchecked="ChkAutostart_Changed" Margin="0,0,0,2"/>
-                    <CheckBox x:Name="ChkStartMinimized" Content="{Binding Edit_StartMinimized}" Checked="ChkStartMinimized_Changed" Unchecked="ChkStartMinimized_Changed" Margin="0,0,0,0"/>
-                    <CheckBox x:Name="ChkMinimizeToTray" Content="{Binding Edit_MinimizeToTray}" Checked="ChkMinimizeToTray_Changed" Unchecked="ChkMinimizeToTray_Changed" Margin="0,0,0,0"/>
-
-                    <Separator Background="{StaticResource BorderBrush}" Margin="0,6,0,2"/>
-
-                    <Grid Margin="0,0,0,2">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <CheckBox x:Name="ChkAdminMode" Content="{Binding Edit_AdminMode}" Click="ChkAdminMode_Click" Margin="0,0,0,0"/>
-                        <TextBlock x:Name="TxtAdminStatus" Text="" Grid.Column="1" FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center" Margin="6,0,0,0"/>
-                    </Grid>
 
                     <Separator Background="{StaticResource BorderBrush}" Margin="0,6,0,4"/>
                 </StackPanel>

@@ -1,3 +1,4 @@
+using System;
 using System.Windows;
 using System.Windows.Media;
 
@@ -24,6 +25,26 @@ namespace TenzoraX
         public static SolidColorBrush BorderBrush => new(Border);
         public static SolidColorBrush HoverBgBrush => new(HoverBg);
         public static SolidColorBrush InputBgBrush => new(InputBg);
+
+        [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+        private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+
+        /// <summary>
+        /// Färbt die native Titelleiste (Standard-Chrome) dunkel ein – gleiche Optik
+        /// wie beim Hauptfenster. Muss aufgerufen werden, sobald das HWND existiert
+        /// (z.B. im Loaded-/SourceInitialized-Ereignis).
+        /// </summary>
+        public static void ApplyImmersiveDarkMode(Window window)
+        {
+            try
+            {
+                IntPtr hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+                int useImmersiveDarkMode = 1;
+                DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useImmersiveDarkMode, sizeof(int));
+            }
+            catch { }
+        }
 
         public static void StyleWindow(Window window)
         {

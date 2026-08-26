@@ -15,9 +15,10 @@ namespace TenzoraX
 
         public UpdateDialog(UpdateInfo info)
         {
+            DataContext = LanguageManager.Instance;
             InitializeComponent();
             _info = info;
-            TxtUpdateMsg.Text = "Eine neue Version von TenzoraX ist verfügbar.";
+            TxtUpdateMsg.Text = LanguageManager.Instance.Update_NewAvailable;
             TxtInstalled.Text = $"v{AppVersion.Current}";
             TxtNewVersion.Text = $"v{info.LatestVersion}";
         }
@@ -33,10 +34,10 @@ namespace TenzoraX
         {
             BtnUpdateNow.IsEnabled = false;
             BtnUpdateLater.IsEnabled = false;
-            BtnUpdateNow.Content = "Wird geladen...";
+            BtnUpdateNow.Content = LanguageManager.Instance.Update_Loading;
             PanelProgress.Visibility = Visibility.Visible;
 
-            TxtProgressStatus.Text = "Update wird heruntergeladen...";
+            TxtProgressStatus.Text = LanguageManager.Instance.Update_Downloading;
 
             var progress = new Progress<int>(pct =>
             {
@@ -53,7 +54,7 @@ namespace TenzoraX
             {
                 if (args.Result is string exePath && File.Exists(exePath))
                 {
-                    TxtProgressStatus.Text = "Update wird installiert...";
+                    TxtProgressStatus.Text = LanguageManager.Instance.Update_Installing;
                     ProgressBar.Value = 100;
                     TxtProgressPct.Text = "100 %";
 
@@ -63,8 +64,8 @@ namespace TenzoraX
                 }
                 else
                 {
-                    TxtProgressStatus.Text = "Download fehlgeschlagen. Bitte erneut versuchen.";
-                    BtnUpdateNow.Content = "Wiederholen";
+                    TxtProgressStatus.Text = LanguageManager.Instance.Update_Failed;
+                    BtnUpdateNow.Content = LanguageManager.Instance.Update_Retry;
                     BtnUpdateNow.IsEnabled = true;
                     BtnUpdateLater.IsEnabled = true;
                     PanelProgress.Visibility = Visibility.Collapsed;

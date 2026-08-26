@@ -11,11 +11,31 @@ namespace TenzoraX
         [DllImport("user32.dll", SetLastError = true)]
         private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetCurrentProcess();
+        [DllImport("kernel32.dll")]
+        private static extern bool CloseHandle(IntPtr hObject);
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool GetTokenInformation(IntPtr tokenHandle, int tokenInformationClass, IntPtr tokenInformation, uint tokenInformationLength, out uint returnLength);
+        [DllImport("advapi32.dll")]
+        private static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+        [DllImport("advapi32.dll")]
+        private static extern IntPtr GetSidSubAuthority(IntPtr sid, uint subAuthorityIndex);
+
         private const int INPUT_KEYBOARD = 1;
         private const int INPUT_MOUSE = 0;
         private const uint KEYEVENTF_KEYUP = 0x0002;
         private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
         private const uint KEYEVENTF_SCANCODE = 0x0008;
+        private const uint KEYEVENTF_UNICODE = 0x0004;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct INPUT
@@ -97,6 +117,18 @@ namespace TenzoraX
             { "F24", (0x87, 0x6F, false) },
             { "NUMLOCK", (0x90, 0x45, true) },
 
+            // Numpad (echte Numpad-VKs + Set-1-Scancodes)
+            { "NUMPAD_0", (0x60, 0x52, false) }, { "NUMPAD_1", (0x61, 0x4F, false) },
+            { "NUMPAD_2", (0x62, 0x50, false) }, { "NUMPAD_3", (0x63, 0x51, false) },
+            { "NUMPAD_4", (0x64, 0x4B, false) }, { "NUMPAD_5", (0x65, 0x4C, false) },
+            { "NUMPAD_6", (0x66, 0x4D, false) }, { "NUMPAD_7", (0x67, 0x47, false) },
+            { "NUMPAD_8", (0x68, 0x48, false) }, { "NUMPAD_9", (0x69, 0x49, false) },
+            { "NUMPAD_DOT", (0x6E, 0x53, false) },
+            { "NUMPAD_DIV", (0x6F, 0x35, false) },
+            { "NUMPAD_MUL", (0x6A, 0x37, false) },
+            { "NUMPAD_MINUS", (0x6D, 0x4A, false) },
+            { "NUMPAD_PLUS", (0x6B, 0x4E, false) },
+
             // Mouse buttons (custom VKs > 0xE000)
             { "MOUSE_LEFT", (0xE001, 0, false) },
             { "MOUSE_RIGHT", (0xE002, 0, false) },
@@ -124,6 +156,171 @@ namespace TenzoraX
             catch { return false; }
         }
 
+        // ============================================================
+        //  UIPI-Erkennung: SendInput wird STILL verworfen, wenn das
+        //  Vordergrund-Fenster mit höheren Rechten läuft als dieser
+        //  Prozess – weder Rückgabewert noch GetLastError melden das
+        //  (laut Doku). Verlässlich ist nur der Integritäts-Level-
+        //  Vergleich (Equal-or-Lesser-Regel von UIPI).
+        // ============================================================
+
+        private const int TokenIntegrityLevel = 25;   // TOKEN_INFORMATION_CLASS::TokenIntegrityLevel
+        private const uint TokenQuery = 0x0008;       // TOKEN_QUERY
+        private const uint ProcessQueryLimited = 0x1000;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct TOKEN_MANDATORY_LABEL
+        {
+            public IntPtr Label;   // PSID
+        }
+
+        /// <summary>Interner Test-Seam: liefert den Integritäts-Level des (simulierten)
+        /// Vordergrund-Fensters statt per Win32-API nachzuschlagen.</summary>
+        internal static Func<int>? ForegroundIntegrityOverride { get; set; }
+
+        /// <summary>Wird ausgelöst, wenn die Tastatur-Ausgabe blockiert ist (UIPI oder
+        /// SendInput-Fehler). Payload: verständliche, lokalisierte Meldung.</summary>
+        internal static event Action<string>? InjectionBlocked;
+
+        internal static string? LastInjectionBlockMessage { get; private set; }
+        internal static DateTime? LastInjectionBlockAt { get; private set; }
+
+        private const long InjectionReportCooldownMs = 10_000;
+        private static long _lastInjectionReportTicks = -InjectionReportCooldownMs;
+
+        private static int? _ownIntegrityLevel;
+        private static int OwnIntegrityLevel => _ownIntegrityLevel ??= GetProcessIntegrityLevel(GetCurrentProcess());
+
+        private static IntPtr _lastCheckedForeground;
+        private static long _lastCheckTicks;
+        private static bool _cachedBlocked;
+
+        internal static bool IsBlockedByUipi()
+        {
+            if (ForegroundIntegrityOverride != null)
+            {
+                int own = OwnIntegrityLevel;
+                return own >= 0 && ForegroundIntegrityOverride() > own;
+            }
+
+            // Schneller Pfad: nur bei Vordergrund-Wechsel oder nach 1 s neu prüfen
+            // (GetForegroundWindow ist billig, OpenProcess+Token nicht).
+            long now = Environment.TickCount64;
+            IntPtr fg = GetForegroundWindow();
+            if (fg == _lastCheckedForeground && now - _lastCheckTicks < 1000)
+                return _cachedBlocked;
+
+            _lastCheckedForeground = fg;
+            _lastCheckTicks = now;
+            _cachedBlocked = false;
+
+            if (fg == IntPtr.Zero) return false;
+            GetWindowThreadProcessId(fg, out uint pid);
+            if (pid == 0) return false;
+
+            IntPtr proc = OpenProcess(ProcessQueryLimited, false, pid);
+            if (proc == IntPtr.Zero) return false;
+            try
+            {
+                int fgLevel = GetProcessIntegrityLevel(proc);
+                int own = OwnIntegrityLevel;
+                _cachedBlocked = own >= 0 && fgLevel > own;
+            }
+            finally
+            {
+                CloseHandle(proc);
+            }
+            return _cachedBlocked;
+        }
+
+        private static int GetProcessIntegrityLevel(IntPtr processHandle)
+        {
+            if (!OpenProcessToken(processHandle, TokenQuery, out IntPtr token)) return -1;
+            try { return ReadIntegrityLevel(token); }
+            finally { CloseHandle(token); }
+        }
+
+        private static int ReadIntegrityLevel(IntPtr tokenHandle)
+        {
+            // Erster Aufruf liefert absichtlich ERROR_INSUFFICIENT_BUFFER (122)
+            // und die benötigte Puffergröße – das ist KEIN Fehlerfall.
+            if (!GetTokenInformation(tokenHandle, TokenIntegrityLevel, IntPtr.Zero, 0, out uint size))
+            {
+                if (Marshal.GetLastWin32Error() != 122) return -1;
+            }
+            IntPtr buffer = Marshal.AllocHGlobal((int)size);
+            try
+            {
+                if (!GetTokenInformation(tokenHandle, TokenIntegrityLevel, buffer, size, out _))
+                    return -1;
+                var label = Marshal.PtrToStructure<TOKEN_MANDATORY_LABEL>(buffer);
+                if (label.Label == IntPtr.Zero) return -1;
+                IntPtr countPtr = GetSidSubAuthorityCount(label.Label);
+                if (countPtr == IntPtr.Zero) return -1;
+                byte count = Marshal.ReadByte(countPtr);
+                if (count == 0) return -1;
+                IntPtr subPtr = GetSidSubAuthority(label.Label, (uint)(count - 1));
+                if (subPtr == IntPtr.Zero) return -1;
+                return Marshal.ReadInt32(subPtr);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+
+        /// <summary>
+        /// Zentrale SendInput-Stelle: prüft vorab auf UIPI-Blockade (dann wird gar
+        /// nicht erst gesendet – die Eingabe würde sonst still verworfen) und meldet
+        /// Fehlfälle anstatt still zu scheitern. Gethrottet auf eine Meldung pro
+        /// Cooldown-Zeitraum, damit der Poll-Thread (bis ~250×/s) nicht spammt.
+        /// </summary>
+        private static uint SendInputChecked(INPUT[] inputs)
+        {
+            if (IsBlockedByUipi())
+            {
+                ReportInjectionBlocked(LanguageManager.Instance["Injection_UipiBlocked"]);
+                return 0;
+            }
+
+            uint ret = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
+            if (ret != inputs.Length)
+                ReportInjectionBlocked(LanguageManager.Instance.Format("Injection_SendInputFailed", Marshal.GetLastWin32Error()));
+            return ret;
+        }
+
+        private static void ReportInjectionBlocked(string message)
+        {
+            long now = Environment.TickCount64;
+            if (now - _lastInjectionReportTicks < InjectionReportCooldownMs) return;
+            _lastInjectionReportTicks = now;
+            LastInjectionBlockMessage = message;
+            LastInjectionBlockAt = DateTime.Now;
+            try
+            {
+                InjectionBlocked?.Invoke(message);
+                App.LogApp("Tastatur-Ausgabe blockiert: " + message);
+            }
+            catch { }
+        }
+
+        /// <summary>Statuszeile für den Diagnosebericht.</summary>
+        public static string FormatInjectionStatus()
+        {
+            if (LastInjectionBlockAt == null)
+                return "OK – keine Blockade erkannt";
+            return "blockiert: " + LastInjectionBlockMessage + " (um " + LastInjectionBlockAt.Value.ToString("HH:mm:ss") + ")";
+        }
+
+        /// <summary>Interner Test-Seam: setzt Blockade-Erkennung und Report-Throttle zurück.</summary>
+        internal static void ResetInjectionReportingForTesting()
+        {
+            ForegroundIntegrityOverride = null;
+            _lastInjectionReportTicks = -InjectionReportCooldownMs;
+            LastInjectionBlockMessage = null;
+            LastInjectionBlockAt = null;
+        }
+
         public static void SimulateKeyDown(List<string> actionKeys)
         {
             if (actionKeys == null || actionKeys.Count == 0) return;
@@ -134,6 +331,75 @@ namespace TenzoraX
         {
             if (actionKeys == null || actionKeys.Count == 0) return;
             SendKeys(actionKeys, true);
+        }
+
+        /// <summary>
+        /// Tippt einen Text (inkl. Emojis) als Tastatureingabe. Emojis (Surrogatpaare)
+        /// werden als Unicode-Zeichenereignisse gesendet (Windows setzt die Paare
+        /// korrekt zusammen), Enter/Tab als echte Tasten.
+        /// </summary>
+        public static void SimulateText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+
+            foreach (char c in text)
+            {
+                switch (c)
+                {
+                    case '\r':
+                        continue;   // Teil von CRLF – nicht doppelt senden
+                    case '\n':
+                        SendVkKey(0x0D);   // Enter
+                        break;
+                    case '\t':
+                        SendVkKey(0x09);   // Tab
+                        break;
+                    default:
+                        SendUnicodeChar(c);
+                        break;
+                }
+            }
+        }
+
+        private static void SendUnicodeChar(char c)
+        {
+            var input = new INPUT
+            {
+                type = INPUT_KEYBOARD,
+                u = new InputUnion
+                {
+                    ki = new KEYBDINPUT
+                    {
+                        wVk = 0,
+                        wScan = (ushort)c,
+                        dwFlags = KEYEVENTF_UNICODE,
+                        time = 0,
+                        dwExtraInfo = IntPtr.Zero
+                    }
+                }
+            };
+            SendInputChecked(new[] { input });
+        }
+
+        private static void SendVkKey(ushort vk)
+        {
+            var down = new INPUT
+            {
+                type = INPUT_KEYBOARD,
+                u = new InputUnion
+                {
+                    ki = new KEYBDINPUT { wVk = vk, wScan = 0, dwFlags = 0, time = 0, dwExtraInfo = IntPtr.Zero }
+                }
+            };
+            var up = new INPUT
+            {
+                type = INPUT_KEYBOARD,
+                u = new InputUnion
+                {
+                    ki = new KEYBDINPUT { wVk = vk, wScan = 0, dwFlags = KEYEVENTF_KEYUP, time = 0, dwExtraInfo = IntPtr.Zero }
+                }
+            };
+            SendInputChecked(new[] { down, up });
         }
 
         public static void SimulateCombination(List<string> actionKeys)
@@ -201,7 +467,7 @@ namespace TenzoraX
                             }
                         }
                     };
-                    SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT)));
+                    SendInputChecked(new[] { input });
                 }
                 else // VK mode (default)
                 {
@@ -224,7 +490,7 @@ namespace TenzoraX
                             }
                         }
                     };
-                    SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT)));
+                    SendInputChecked(new[] { input });
                 }
             }
         }
@@ -252,7 +518,7 @@ namespace TenzoraX
                     }
                 }
             };
-            SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT)));
+            SendInputChecked(new[] { input });
         }
     }
 }

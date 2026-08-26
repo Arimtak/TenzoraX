@@ -5,6 +5,10 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TenzoraX", "src\TenzoraX\TenzoraX.csproj", "{6A1DFC71-7C25-493D-908B-82C4717E9779}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{A2FF2C5E-31A3-4821-9994-9608BCB4B929}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TenzoraX.Tests", "tests\TenzoraX.Tests\TenzoraX.Tests.csproj", "{6ED98172-C64D-4DC3-818B-76E7C903B461}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -18,5 +22,12 @@ Global
 		{6A1DFC71-7C25-493D-908B-82C4717E9779}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6A1DFC71-7C25-493D-908B-82C4717E9779}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6A1DFC71-7C25-493D-908B-82C4717E9779}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6ED98172-C64D-4DC3-818B-76E7C903B461}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6ED98172-C64D-4DC3-818B-76E7C903B461}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6ED98172-C64D-4DC3-818B-76E7C903B461}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6ED98172-C64D-4DC3-818B-76E7C903B461}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{6ED98172-C64D-4DC3-818B-76E7C903B461} = {A2FF2C5E-31A3-4821-9994-9608BCB4B929}
 	EndGlobalSection
 EndGlobal

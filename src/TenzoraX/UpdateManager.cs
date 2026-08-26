@@ -105,7 +105,13 @@ namespace TenzoraX
                         Directory.Delete(extractDir, true);
                     ZipFile.ExtractToDirectory(downloadPath, extractDir);
 
+                    // Bevorzugt die App-EXE (TenzoraX.exe). Treiber-Setups (HidHideSetup.exe,
+                    // ViGEmBusSetup.exe) gehören NICHT zur App – falls eine alte ZIP sie
+                    // enthält, wird trotzdem nur die App-EXE übernommen.
                     var exeFiles = Directory.GetFiles(extractDir, "*.exe", SearchOption.TopDirectoryOnly);
+                    string? appExe = exeFiles.FirstOrDefault(f =>
+                        Path.GetFileName(f).StartsWith("TenzoraX", StringComparison.OrdinalIgnoreCase));
+                    if (appExe != null) return appExe;
                     if (exeFiles.Length == 0) return null;
                     return exeFiles[0];
                 }

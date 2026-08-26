@@ -69,6 +69,8 @@ namespace TenzoraX
         public double ControllerTop { get; set; } = 20;
         public bool CaptureEnabled { get; set; } = true;
         public string Language { get; set; } = "";
+        /// <summary>Auto-Wiederauswahl des Controllers: "first" (erster verbundener) oder "last" (zuletzt verwendeter, StableId).</summary>
+        public string ControllerReselectMode { get; set; } = "first";
 
         public bool BatteryEnabled { get; set; } = false;
         public double BatteryHours { get; set; } = 15;
@@ -81,6 +83,8 @@ namespace TenzoraX
         public double WindowTop { get; set; } = double.NaN;
         public bool WindowMaximized { get; set; } = false;
         public string OutputMode { get; set; } = "VK";
+        /// <summary>Ob der aktive Controller zusätzlich als virtueller Xbox-360-Controller (ViGEm) gespiegelt wird.</summary>
+        public bool UseVigemXbox { get; set; } = false;
         public bool SoundEnabled { get; set; } = true;
         public double SoundVolume { get; set; } = 0.5;
         public bool RunAsAdministrator { get; set; } = false;
@@ -90,16 +94,30 @@ namespace TenzoraX
         public double NotificationWidth { get; set; } = 360;
         public double NotificationPositionX { get; set; } = -1;
         public double NotificationPositionY { get; set; } = -1;
+        // Ecke für die Benachrichtigung: TopRight | TopLeft | BottomRight | BottomLeft
+        public string NotificationCorner { get; set; } = "TopRight";
     }
 
     public partial class MainWindow : Window
     {
-        [DllImport("dwmapi.dll")]
-        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
-        private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+        private const int WM_INPUT = 0x00FF;
+
+        private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if (msg == WM_INPUT)
+            {
+                ControllerManager.Instance.HandleWmInput(lParam);
+                handled = true;
+                return IntPtr.Zero;
+            }
+            return IntPtr.Zero;
+        }
 
         [DllImport("user32.dll")]
         private static extern bool DestroyIcon(IntPtr hIcon);
+
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
         private NotifyIcon? _notifyIcon;
         private bool _isExplicitClose = false;
@@ -111,6 +129,17 @@ namespace TenzoraX
         private readonly InputCaptureEngine _capture = new();
         private readonly Dictionary<string, System.Windows.Controls.Button> _gamepadButtonsUi = new();
         private readonly HashSet<string> _physicallyHeldButtons = new();
+        private readonly List<DetectedController> _comboControllers = new();
+        private volatile bool _stateUiUpdatePending;
+
+        // UI-Update-Diffing: Der Poll-Thread feuert StateChanged mit ~250 Hz – auch
+        // wenn sich nichts ändert. Ohne Diffing hätte jeder UI-Update ~20 neue Brushes
+        // und Canvas-Positionen erzeugt und den UI-Thread gesättigt (→ sichtbarer Lag).
+        private readonly HashSet<string> _lastRenderedButtons = new();
+        private string _lastRenderedBattery = "";
+        private double _lastRenderedLx, _lastRenderedLy, _lastRenderedRx, _lastRenderedRy;
+        private readonly System.Diagnostics.Stopwatch _uiGate = System.Diagnostics.Stopwatch.StartNew();
+        private const long MinUiUpdateIntervalMs = 8;   // max. ~120 UI-Updates/s
 
         // Drag-Drop support for button positioning
         private bool _isDragging = false;
@@ -135,6 +164,10 @@ namespace TenzoraX
         private bool _batteryWasActiveLastTick = false;
         private const double BatteryActiveTimeoutSeconds = 5;
         private int _batteryLastIconPercent = -1;
+        // Echter Akku (HID/XInput) statt Schätzung: wird gerade ein echter Wert
+        // angezeigt (Timer darf ihn nicht überschreiben) und welcher Prozentwert.
+        private bool _showingRealBattery = false;
+        private int? _realBatteryPercent = null;
 
         public MainWindow()
         {
@@ -175,15 +208,24 @@ namespace TenzoraX
         {
             try
             {
+                ThemeHelper.ApplyImmersiveDarkMode(this);
                 IntPtr hwnd = new WindowInteropHelper(this).Handle;
-                int useImmersiveDarkMode = 1;
-                DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useImmersiveDarkMode, sizeof(int));
+
+                // RawInput für HID-Gamepads (WM_INPUT): funktioniert auch, wenn andere
+                // Prozesse (z.B. Steam) das Gerät offen halten – gleicher Weg wie joy.cpl.
+                ControllerManager.Instance.RegisterRawInput(hwnd);
+                HwndSource.FromHwnd(hwnd)?.AddHook(WndProc);
 
                 Icon = CreateControllerIconSource();
                 InitializeGamepadButtonMap();
                 LoadSettings();
 
                 App.LogApp("Konfiguration geladen");
+
+                // Autostart auf Task-Scheduler (höchste Rechte) migrieren, damit die
+                // App beim Anmelden OHNE UAC-Prompt erhöht startet – kein Aufblitzen.
+                if (_settings.AutostartEnabled)
+                    SettingsWindow.MigrateAutostartToTaskScheduler();
 
                 // Restore window size/position
                 if (_settings.WindowWidth > 0 && _settings.WindowHeight > 0)
@@ -217,15 +259,22 @@ namespace TenzoraX
                 if (_settings.WindowMaximized)
                     WindowState = WindowState.Maximized;
 
-                // Auto-elevate: only if setting is on AND we're not already admin
-                if (_settings.RunAsAdministrator && !InputSimulator.IsRunningAsAdmin())
+                // Auto-elevate: only if setting is on AND we're not already admin.
+                // Beim Autostart (--minimized) NICHT erhöhen: Der Task-Scheduler startet
+                // die App bereits erhöht; ein UAC-Prompt beim Boot wäre genau das
+                // sichtbare Aufblitzen, das der Nutzer nicht will. Nur bei manuellem
+                // Start (ohne --minimized) einmalig erhöhen.
+                var cmdLineArgs = Environment.GetCommandLineArgs();
+                bool isBootStart = cmdLineArgs.Contains("--minimized");
+                if (_settings.RunAsAdministrator && !InputSimulator.IsRunningAsAdmin() && !isBootStart)
                 {
                     try
                     {
                         var cmdArgs = Environment.GetCommandLineArgs();
-                        var argStr = cmdArgs.Length > 1
-                            ? string.Join(" ", cmdArgs.Skip(1).Select(a => a.Contains(' ') ? $"\"{a}\"" : a))
-                            : "";
+                        var restArgs = cmdArgs.Skip(1).ToList();
+                        if (!restArgs.Contains("--admin-restart")) restArgs.Add("--admin-restart");
+                        var argStr = string.Join(" ", restArgs
+                            .Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
                         var psi = new ProcessStartInfo
                         {
                             FileName = Environment.ProcessPath,
@@ -234,6 +283,7 @@ namespace TenzoraX
                             Arguments = argStr
                         };
                         Process.Start(psi);
+                        App.ReleaseInstanceMutex();
                         Environment.Exit(0);
                         return;
                     }
@@ -261,11 +311,33 @@ namespace TenzoraX
             InitializeTrayIcon();
             InitializeDragHandlers();
 
+            // Blockade der Tastatur-Ausgabe (UIPI: aktives Fenster mit Admin-Rechten)
+            // sichtbar machen statt still zu scheitern. BeginInvoke: nicht vom
+            // Poll-Thread aus blockieren. Meldung ist bereits lokalisiert.
+            InputSimulator.InjectionBlocked += message =>
+            {
+                try
+                {
+                    Dispatcher.BeginInvoke(() => NotificationManager.Show("", message));
+                }
+                catch { }
+            };
+
             ControllerManager.Instance.GamepadsChanged += OnGamepadsChanged;
             ControllerManager.Instance.StateChanged += OnControllerStateChanged;
             ControllerManager.Instance.Initialize();
+            // ViGEm-Xbox-Spiegelung gemäß gespeicherter Einstellung wiederherstellen.
+            if (_settings.UseVigemXbox)
+                ControllerManager.Instance.SetVigemXbox(_settings.UseVigemXbox);
             RefreshGamepadsList();
+            InitVigemHidhideUi();
+            ControllerManager.Instance.ReselectMode = _settings.ControllerReselectMode;
+            StartHidHideRestoreTimer();
+            StartLiveInputTimer();
             App.LogApp("Controller-System initialisiert");
+
+            // Hinweis erst nach dem ersten Rendering zeigen (nicht beim Start aufblitzen lassen).
+            Dispatcher.BeginInvoke(() => CheckAdminStartupHint());
 
             RefreshProfilesList();
             SelectProfile(_settings.LastActiveProfile);
@@ -278,18 +350,12 @@ namespace TenzoraX
                 else
                     RadioEditImage.IsChecked = true;
             }
-            ChkAutostart.IsChecked = _settings.AutostartEnabled;
-            ChkStartMinimized.IsChecked = _settings.StartMinimized;
-            ChkMinimizeToTray.IsChecked = _settings.MinimizeToTray;
 
             // Output mode
             ComboOutputMode.Items.Add(Lang.OutputMode_VK);
             ComboOutputMode.Items.Add(Lang.OutputMode_ScanCode);
             ComboOutputMode.SelectedIndex = _settings.OutputMode == "ScanCode" ? 1 : 0;
             ApplyOutputMode();
-
-            // Admin mode
-            UpdateAdminUI();
 
             // Initialize manager state from settings (UI controls are in SettingsWindow)
             SoundManager.Enabled = _settings.SoundEnabled;
@@ -299,6 +365,11 @@ namespace TenzoraX
             NotificationManager.NotificationWidth = _settings.NotificationWidth;
             NotificationManager.SavedPosX = _settings.NotificationPositionX;
             NotificationManager.SavedPosY = _settings.NotificationPositionY;
+            if (_settings.NotificationCorner is NotificationManager.CornerTopLeft
+                or NotificationManager.CornerTopRight
+                or NotificationManager.CornerBottomLeft
+                or NotificationManager.CornerBottomRight)
+                NotificationManager.Corner = _settings.NotificationCorner;
 
             // Battery UI initialization
             InitBatteryTimer();
@@ -811,54 +882,229 @@ namespace TenzoraX
         private void RefreshGamepadsList()
         {
             ComboGamepads.Items.Clear();
-            var controllers = ControllerManager.Instance.ConnectedControllerNames;
-            if (controllers.Count == 0)
+            _comboControllers.Clear();
+            _comboControllers.AddRange(ControllerManager.Instance.ConnectedControllers);
+            if (_comboControllers.Count == 0)
             {
                 ComboGamepads.Items.Add(Lang.Combo_NoController);
                 ComboGamepads.SelectedIndex = 0;
-                TxtStatus.Text = Lang.Status_Disconnected;
-                TxtStatus.Foreground = System.Windows.Media.Brushes.Gray;
+                SetStatusText(Lang.Status_Disconnected, System.Windows.Media.Brushes.Gray);
                 TxtBattery.Text = Lang.Battery_NA;
             }
             else
             {
-                foreach (var c in controllers)
-                    ComboGamepads.Items.Add(c);
-                ComboGamepads.SelectedIndex = ControllerManager.Instance.ActiveGamepadIndex >= 0 ? ControllerManager.Instance.ActiveGamepadIndex : 0;
-                TxtStatus.Text = Lang.Status_Connected;
-                TxtStatus.Foreground = System.Windows.Media.Brushes.LightGreen;
+                foreach (var c in _comboControllers)
+                {
+                    string suffix = c.AccessError ? " ⚠" : "";
+                    ComboGamepads.Items.Add(c.Name + " (" + c.ConnectionType + ")" + suffix);
+                }
+                int idx = ControllerManager.Instance.ActiveGamepadIndex;
+                if (idx >= 0 && idx < _comboControllers.Count)
+                    ComboGamepads.SelectedIndex = idx;
+                UpdateStatusFromSelection();
             }
+        }
+
+        private void ComboGamepads_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            // Pfeiltasten (↑/↓) öffnen die Controller-Liste, statt nur zu navigieren
+            if (!ComboGamepads.IsDropDownOpen && (e.Key == System.Windows.Input.Key.Down || e.Key == System.Windows.Input.Key.Up))
+                ComboGamepads.IsDropDownOpen = true;
         }
 
         private void ComboGamepads_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (ComboGamepads.SelectedIndex >= 0 && ControllerManager.Instance.ConnectedControllerNames.Count > 0)
-                ControllerManager.Instance.ActiveGamepadIndex = ComboGamepads.SelectedIndex;
+            int idx = ComboGamepads.SelectedIndex;
+            if (idx >= 0 && idx < _comboControllers.Count)
+            {
+                ControllerManager.Instance.ActiveGamepadIndex = idx;
+                ControllerManager.Instance.SetActiveController(_comboControllers[idx].StableId);
+                UpdateStatusFromSelection();
+            }
+        }
+
+        private void UpdateStatusFromSelection()
+        {
+            int idx = ComboGamepads.SelectedIndex;
+            if (_comboControllers.Count == 0 || idx < 0 || idx >= _comboControllers.Count)
+            {
+                SetStatusText(Lang.Status_Disconnected, System.Windows.Media.Brushes.Gray);
+                TxtBattery.Text = Lang.Battery_NA;
+                return;
+            }
+
+            var c = _comboControllers[idx];
+            if (c.AccessError)
+            {
+                SetStatusText(Lang.Status_AccessError, System.Windows.Media.Brushes.Orange);
+                TxtBattery.Text = Lang.Battery_NA;
+                App.LogApp("Controller ohne Zugriff: " + c.Name + " – " + c.AccessErrorReason);
+            }
+            else
+            {
+                SetStatusText(Lang.Status_Connected, System.Windows.Media.Brushes.LightGreen);
+            }
+        }
+
+        private bool HasAnyAccessError()
+        {
+            foreach (var c in _comboControllers)
+                if (c.AccessError) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Die Statuszeile („Status: Verbunden“) wurde aus dem Hauptfenster entfernt.
+        /// Die Methode bleibt als No-op bestehen, damit alle Aufrufer unverändert bleiben.
+        /// </summary>
+        private void SetStatusText(string text, System.Windows.Media.Brush brush)
+        {
+            // absichtlich leer – Anzeige entfernt
+        }
+
+        private void TogglePause()
+        {
+            ProfileManager.SetPaused(!ProfileManager.IsPaused);
+            if (!ProfileManager.IsPaused)
+            {
+                UpdateStatusFromSelection();
+            }
+            UpdateTrayMenu();
+        }
+
+        private void BtnControllerHistory_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var win = new ControllerHistoryWindow { Owner = this };
+                win.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                App.LogApp("Verlauf-Fenster Fehler: " + ex.Message);
+            }
+        }
+
+        private void BtnDiagnostics_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var win = new DiagnosticsWindow { Owner = this };
+                win.Show();
+            }
+            catch (Exception ex)
+            {
+                App.LogApp("Diagnose-Fenster Fehler: " + ex.Message);
+            }
         }
 
         private void OnControllerStateChanged(object? sender, ControllerStateEventArgs e)
         {
+            // Eingabe-Verarbeitung direkt auf dem Poll-Thread: StateChanged wird
+            // ausschließlich vom Poll-Thread ausgelöst (ReadXInput/ReadHid/
+            // ReadWinMM). Die Mapping-Ausgabe (SendInput) läuft damit NICHT über
+            // den WPF-Dispatcher und wird durch UI-Stau (Stick-Visualisierung,
+            // Button-Highlights, Batterie) nicht mehr verzögert.
+            LatencyMonitor.MarkInputEvent();
+            ProfileManager.Instance.ProcessControllerInput(e.PressedButtons);
+
+            // UI-Updates bündeln: nur EIN ausstehender BeginInvoke gleichzeitig.
+            // Kommt der UI-Thread nicht nach (z.B. Stick-Visualisierung bei ~250 Hz),
+            // gewinnt der neueste Zustand – die Dispatcher-Queue wächst nicht endlos
+            // und die Eingabe-Ausgabe ist davon ohnehin entkoppelt.
+            if (_stateUiUpdatePending) return;
+            // Zusätzlich auf max. ~120 Hz begrenzen: rendern kann nur der Monitor,
+            // und bei Dauerbewegung der Sticks würde der UI-Thread sonst mit 250 Hz
+            // Layout/Render-Arbeit beschäftigt.
+            if (_uiGate.ElapsedMilliseconds < MinUiUpdateIntervalMs) return;
+            _stateUiUpdatePending = true;
+            _uiGate.Restart();
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             Dispatcher.BeginInvoke(() =>
             {
-                // Track battery input time
+                try
+                {
+                    sw.Stop();
+                    LatencyMonitor.RecordDispatcherBacklog(sw.Elapsed);
+                    UpdateUiFromControllerState(e);
+                }
+                finally
+                {
+                    _stateUiUpdatePending = false;
+                }
+            });
+        }
+
+        private void UpdateUiFromControllerState(ControllerStateEventArgs e)
+        {
+            // Track battery input time
                 if (_settings.BatteryEnabled && e.ControllerName != "None" && e.PressedButtons.Count > 0)
                     _lastBatteryInputTime = DateTime.UtcNow;
 
+                // Echter Akku (HID-Report / XInput) hat Vorrang vor der berechneten Schätzung.
+                bool hasRealBattery = !string.IsNullOrEmpty(e.BatteryInfo) && e.BatteryInfo != "N/A";
+
                 if (e.ControllerName == "None")
                 {
-                    TxtStatus.Text = Lang.Status_Disconnected;
-                    TxtStatus.Foreground = System.Windows.Media.Brushes.Gray;
-                    TxtBattery.Text = Lang.Battery_NA;
+                    if (HasAnyAccessError())
+                    {
+                        SetStatusText(Lang.Status_AccessError, System.Windows.Media.Brushes.Orange);
+                    }
+                    else
+                    {
+                        SetStatusText(Lang.Status_Disconnected, System.Windows.Media.Brushes.Gray);
+                    }
+                    // Controller weg → kein echter Wert mehr. Bei aktivierter berechneter
+                    // Batterie übernimmt der 1-s-Timer die Schätzung; sonst „N/A“. Der
+                    // Leerlauf darf die Anzeige nicht im Sekundentakt flackern lassen.
+                    _showingRealBattery = false;
+                    _realBatteryPercent = null;
+                    UpdateBatteryLowWarning();
+                    // Tray auf Schätzung/Standard zurücksetzen (echter Wert ist weg).
+                    ApplyBatteryToTray();
+                    if (!_settings.BatteryEnabled && !hasRealBattery)
+                        TxtBattery.Text = Lang.Battery_NA;
                 }
                 else
                 {
-                    TxtStatus.Text = Lang.Status_Connected;
-                    TxtStatus.Foreground = System.Windows.Media.Brushes.LightGreen;
+                    SetStatusText(Lang.Status_Connected, System.Windows.Media.Brushes.LightGreen);
                 }
 
-                // Batterie-Status immer aktualisieren
-                TxtBattery.Text = e.BatteryInfo;
-                UpdateBatteryBar(e.BatteryInfo);
+                // Batterie nur bei tatsächlicher Änderung aktualisieren (ändert sich
+                // nur ~1×/Sekunde – nicht bei jedem der 250 Polls pro Sekunde).
+                if (e.BatteryInfo != _lastRenderedBattery)
+                {
+                    _lastRenderedBattery = e.BatteryInfo;
+                    if (hasRealBattery)
+                    {
+                        // Echter Wert (HID/XInput) – anzeigen statt der Schätzung.
+                        // WICHTIG: Auch den Tray aktualisieren – der Timer (Schätzung)
+                        // wird bei echtem Akku übersprungen, sonst bliebe das Tray-
+                        // Icon/Tooltip auf dem alten Schätzwert (z.B. 100 %) stehen.
+                        _showingRealBattery = true;
+                        _realBatteryPercent = int.TryParse(e.BatteryInfo.TrimEnd('%'), out int pct) ? pct : null;
+                        TxtBattery.Text = e.BatteryInfo;
+                        UpdateBatteryBar(e.BatteryInfo);
+                        ApplyBatteryToTray();
+                    }
+                    else if (!_settings.BatteryEnabled)
+                    {
+                        // Kein echter Wert, Schätzung aus → klassische XInput-Anzeige (auch „N/A“).
+                        _showingRealBattery = false;
+                        _realBatteryPercent = null;
+                        TxtBattery.Text = e.BatteryInfo;
+                        UpdateBatteryBar(e.BatteryInfo);
+                    }
+                    else
+                    {
+                        // Kein echter Wert, Schätzung an → sofort den Timer-Wert zeigen.
+                        _showingRealBattery = false;
+                        _realBatteryPercent = null;
+                        UpdateCalculatedBatteryBar();
+                    }
+                    UpdateBatteryLowWarning();
+                }
 
                 foreach (var pair in _gamepadButtonsUi)
                 {
@@ -867,8 +1113,13 @@ namespace TenzoraX
 
                     if (e.PressedButtons.Contains(btnKey))
                     {
-                        btn.Background = System.Windows.Media.Brushes.Cyan;
-                        btn.BorderBrush = System.Windows.Media.Brushes.White;
+                        // Highlight nur beim Übergang setzen – nicht bei jedem Tick
+                        if (!_lastRenderedButtons.Contains(btnKey))
+                        {
+                            _lastRenderedButtons.Add(btnKey);
+                            btn.Background = System.Windows.Media.Brushes.Cyan;
+                            btn.BorderBrush = System.Windows.Media.Brushes.White;
+                        }
                         if (!_physicallyHeldButtons.Contains(btnKey))
                         {
                             _physicallyHeldButtons.Add(btnKey);
@@ -880,13 +1131,17 @@ namespace TenzoraX
                     }
                     else
                     {
-                        if (btnKey == "A") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(20, 44, 30));
-                        else if (btnKey == "B") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(47, 20, 24));
-                        else if (btnKey == "X") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(18, 32, 48));
-                        else if (btnKey == "Y") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(42, 36, 21));
-                        else btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(26, 26, 36));
+                        if (_lastRenderedButtons.Contains(btnKey))
+                        {
+                            _lastRenderedButtons.Remove(btnKey);
+                            if (btnKey == "A") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(20, 44, 30));
+                            else if (btnKey == "B") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(47, 20, 24));
+                            else if (btnKey == "X") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(18, 32, 48));
+                            else if (btnKey == "Y") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(42, 36, 21));
+                            else btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(26, 26, 36));
 
-                        btn.BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(45, 45, 61));
+                            btn.BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(45, 45, 61));
+                        }
                         _physicallyHeldButtons.Remove(btnKey);
                     }
                 }
@@ -914,53 +1169,80 @@ namespace TenzoraX
 
             if (!_settings.EditMode)
             {
-                // Map -1..1 to 0..24 range (centered at 12)
-                Canvas.SetLeft(Btn_L3, 12 + (e.LeftStickX * 12));
-                Canvas.SetTop(Btn_L3, 12 + (e.LeftStickY * -12));
-                Canvas.SetLeft(Btn_R3, 12 + (e.RightStickX * 12));
-                Canvas.SetTop(Btn_R3, 12 + (e.RightStickY * -12));
+                // Map -1..1 to 0..24 range (centered at 12) – nur bei Änderung setzen,
+                // sonst invalidieren die Canvas.SetLeft/SetTop bei jedem Tick das Layout.
+                // Quantisiert, damit winziges Analog-Jitter in Ruhelage nicht rendert.
+                double lx = Math.Round(e.LeftStickX, 3);
+                double ly = Math.Round(e.LeftStickY, 3);
+                double rx = Math.Round(e.RightStickX, 3);
+                double ry = Math.Round(e.RightStickY, 3);
+                if (lx != _lastRenderedLx || ly != _lastRenderedLy)
+                {
+                    _lastRenderedLx = lx;
+                    _lastRenderedLy = ly;
+                    Canvas.SetLeft(Btn_L3, 12 + (lx * 12));
+                    Canvas.SetTop(Btn_L3, 12 + (ly * -12));
+                }
+                if (rx != _lastRenderedRx || ry != _lastRenderedRy)
+                {
+                    _lastRenderedRx = rx;
+                    _lastRenderedRy = ry;
+                    Canvas.SetLeft(Btn_R3, 12 + (rx * 12));
+                    Canvas.SetTop(Btn_R3, 12 + (ry * -12));
+                }
             }
+        }
 
-                ProfileManager.Instance.ProcessControllerInput(e.PressedButtons);
-            });
+        /// <summary>
+        /// Zeigt die Akku-Warnung (⚠) im Hauptfenster, sobald der ECHTE Akkustand
+        /// unter 20 % fällt. Die Schätzung löst keine Warnung aus.
+        /// </summary>
+        private void UpdateBatteryLowWarning()
+        {
+            bool low = _realBatteryPercent is int rp && rp < 20;
+            TxtBatteryWarning.Visibility = low
+                ? System.Windows.Visibility.Visible
+                : System.Windows.Visibility.Collapsed;
         }
 
         private void UpdateBatteryBar(string batteryInfo)
         {
-            if (_settings.BatteryEnabled)
+            // Echte Werte kommen als „NN%“ (HID/XInput). Beliebige Prozentwerte
+            // werden direkt auf Balkenbreite und Farbe abgebildet; „N/A“ = leer.
+            double percent = -1;
+            if (batteryInfo != null && batteryInfo.EndsWith("%"))
             {
-                UpdateCalculatedBatteryBar();
-                return;
+                if (double.TryParse(batteryInfo[..^1], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out double p))
+                    percent = Math.Clamp(p, 0, 100);
             }
 
-            // Fallback to old XInput battery bar
             double widthFraction;
             System.Windows.Media.Brush color;
-
-            if (batteryInfo == "100%")
-            {
-                widthFraction = 1.0;
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129));
-            }
-            else if (batteryInfo == "67%")
-            {
-                widthFraction = 0.67;
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(245, 158, 11));
-            }
-            else if (batteryInfo == "33%")
-            {
-                widthFraction = 0.33;
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(251, 146, 60));
-            }
-            else if (batteryInfo == "0%")
-            {
-                widthFraction = 0.05;
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));
-            }
-            else
+            if (percent < 0)
             {
                 widthFraction = 0;
                 color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(100, 100, 100));
+            }
+            else if (percent > 60)
+            {
+                widthFraction = percent / 100.0;
+                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129));
+            }
+            else if (percent > 30)
+            {
+                widthFraction = percent / 100.0;
+                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(245, 158, 11));
+            }
+            else if (percent > 10)
+            {
+                widthFraction = percent / 100.0;
+                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(251, 146, 60));
+            }
+            else
+            {
+                widthFraction = Math.Max(0.05, percent / 100.0);
+                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));
             }
 
             BatteryLevel.Width = Math.Max(2, 22 * widthFraction);
@@ -995,6 +1277,10 @@ namespace TenzoraX
             }
 
             _batteryWasActiveLastTick = isActive;
+
+            // Echter Akku (HID/XInput) wird gerade angezeigt – die Schätzung darf
+            // den Wert nicht überschreiben.
+            if (_showingRealBattery) return;
             UpdateCalculatedBatteryBar();
         }
 
@@ -1039,15 +1325,24 @@ namespace TenzoraX
         {
             if (_notifyIcon == null) return;
 
-            if (!_settings.BatteryEnabled || !_settings.BatteryTrayEnabled)
+            // Batterie-Icon im Tray zeigen, wenn aktiviert UND (Schätzung an ODER ein
+            // echter Akkuwert vorliegt – der echte Wert funktioniert auch ohne Schätzung).
+            if (!_settings.BatteryTrayEnabled || (!_settings.BatteryEnabled && _realBatteryPercent == null))
             {
-                _notifyIcon.Icon = CreateControllerIcon();
+                // Standard-Icon ist gecacht – nur zuweisen, wenn es sich wirklich
+                // geändert hat (sonst bei jedem UI-Update neues GDI-Handle → Leak).
+                var defaultIcon = CreateControllerIcon();
+                if (!ReferenceEquals(_notifyIcon.Icon, defaultIcon))
+                    _notifyIcon.Icon = defaultIcon;
                 _notifyIcon.Text = "TenzoraX";
                 _batteryLastIconPercent = -1;
                 return;
             }
 
-            double percent = GetCalculatedBatteryPercent();
+            // Echter Akku hat Vorrang; sonst die berechnete Schätzung.
+            double percent = _realBatteryPercent is int real
+                ? real
+                : GetCalculatedBatteryPercent();
             int intPercent = (int)Math.Round(percent);
 
             // Build tooltip with controller info
@@ -1058,6 +1353,8 @@ namespace TenzoraX
                 controllerName = controllers[0];
 
             string tip = $"TenzoraX\n{Lang.Battery_Label}: {batteryLabel}";
+            if (_realBatteryPercent is int rp && rp < 20)
+                tip += "\n" + Lang.Battery_Low;
             if ((DateTime.UtcNow - _lastBatteryInputTime).TotalSeconds < BatteryActiveTimeoutSeconds)
                 tip += $"\n{(Lang.CurrentLang == "de" ? "Controller aktiv" : "Controller active")}";
             _notifyIcon.Text = tip;
@@ -1079,6 +1376,9 @@ namespace TenzoraX
         }
 
         private System.Drawing.Icon? _batteryIcon;
+        // Gecachtes Standard-Icon: einmal erzeugen und wiederverwenden statt bei
+        // jedem UI-Update neu zu allokieren (GDI-Handle-Leak → GDI+-Crash).
+        private System.Drawing.Icon? _controllerIcon;
 
         private System.Drawing.Icon LoadBatteryIcon(double percent)
         {
@@ -1238,6 +1538,27 @@ namespace TenzoraX
             TxtSelectedCombo.Text = Lang.Mapping_ComboPlaceholder;
         }
 
+        private void ListMappings_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            // Gespeicherte Kombination anklicken → in den Editor laden, damit sie
+            // bearbeitet werden kann (Text-Aktion/Tasten ändern statt neu anlegen).
+            if (ListMappings.SelectedItem is Mapping mapping)
+            {
+                _capture.LoadMapping(mapping);
+                TxtSelectedCombo.Text = _capture.ComboDisplay;
+                if (string.IsNullOrEmpty(_capture.ComboDisplay))
+                    TxtSelectedCombo.Text = Lang.Mapping_ComboPlaceholder;
+                TxtSelectedAction.Text = _capture.ActionDisplay;
+                if (string.IsNullOrEmpty(_capture.ActionDisplay))
+                    TxtSelectedAction.Text = Lang.Mapping_ActionPlaceholder;
+                TxtMappingName.Text = mapping.Name ?? "";
+                // Laufende Aufnahme beenden + Button zurücksetzen
+                BtnRecord.Content = Lang.Mapping_Record;
+                BtnRecord.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129));
+                BtnRecord.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(15, 44, 58));
+            }
+        }
+
         private void BtnClearAction_Click(object sender, RoutedEventArgs e)
         {
             _capture.ClearAction();
@@ -1252,16 +1573,24 @@ namespace TenzoraX
                 return;
             }
 
+            // Name (Beschriftung) ist optional und wird nie getippt.
+            string? name = string.IsNullOrWhiteSpace(TxtMappingName.Text) ? null : TxtMappingName.Text.Trim();
+
             var existing = ProfileManager.Instance.ActiveProfile.Mappings.FirstOrDefault(m => m.Combo.SequenceEqual(_capture.CurrentCombo));
             if (existing != null)
+            {
                 existing.Action = new List<string>(_capture.CurrentAction);
+                existing.Text = _capture.CurrentActionText;
+                existing.Name = name;
+            }
             else
-                ProfileManager.Instance.ActiveProfile.Mappings.Add(new Mapping { Combo = new List<string>(_capture.CurrentCombo), Action = new List<string>(_capture.CurrentAction) });
+                ProfileManager.Instance.AddMapping(new Mapping { Combo = new List<string>(_capture.CurrentCombo), Action = new List<string>(_capture.CurrentAction), Text = _capture.CurrentActionText, Name = name });
 
             ProfileManager.Instance.SaveActiveProfile();
             _capture.Reset();
             TxtSelectedCombo.Text = Lang.Mapping_ComboPlaceholder;
             TxtSelectedAction.Text = Lang.Mapping_ActionPlaceholder;
+            TxtMappingName.Text = "";
             BtnRecord.Content = Lang.Mapping_Record;
             BtnRecord.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129));
             BtnRecord.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(15, 44, 58));
@@ -1273,7 +1602,7 @@ namespace TenzoraX
         {
             if (sender is System.Windows.Controls.Button btn && btn.Tag is Mapping mapping)
             {
-                ProfileManager.Instance.ActiveProfile.Mappings.Remove(mapping);
+                ProfileManager.Instance.RemoveMapping(mapping);
                 ProfileManager.Instance.SaveActiveProfile();
                 ListMappings.ItemsSource = null;
                 ListMappings.ItemsSource = ProfileManager.Instance.ActiveProfile.Mappings;
@@ -1302,6 +1631,7 @@ namespace TenzoraX
                 _capture.ClearAction();
                 TxtSelectedCombo.Text = Lang.Mapping_ComboPlaceholder;
                 TxtSelectedAction.Text = Lang.Mapping_ActionPlaceholder;
+                TxtMappingName.Text = "";
                 BtnRecord.Content = Lang.Mapping_StopRecord;
                 BtnRecord.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));
                 BtnRecord.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(47, 20, 24));
@@ -1454,12 +1784,690 @@ namespace TenzoraX
             ComboOutputMode.Items.Add(Lang.OutputMode_ScanCode);
             ComboOutputMode.SelectedIndex = sel >= 0 ? sel : 0;
 
-            TxtAdminStatus.Text = InputSimulator.IsRunningAsAdmin() ? Lang.Edit_AdminElevated : Lang.Edit_AdminUser;
-
             if (!_capture.IsCapturing)
                 BtnRecord.Content = Lang.Mapping_Record;
             else
                 BtnRecord.Content = Lang.Mapping_StopRecord;
+
+            UpdateVigemStatusMain();
+            UpdateHidhideStatusMain();
+        }
+
+        private bool _suppressVigemChanged;
+        private bool _hidhideAutoActive;
+        private string _hidhideAutoInstanceId = "";
+        private bool _adminPromptShown;
+        private string _hidhideStatusOverride = "";
+        private System.Windows.Threading.DispatcherTimer? _hidhideRestoreTimer;
+
+        private void InitVigemHidhideUi()
+        {
+            _suppressVigemChanged = true;
+            ChkVigemXboxMain.IsChecked = _settings.UseVigemXbox;
+            _suppressVigemChanged = false;
+            UpdateVigemStatusMain();
+            UpdateHidhideStatusMain();
+            UpdateDriversHeaderStatus();
+
+            // Treiber-Status live halten: Registry-Check ist billig (ein paar
+            // Millisekunden alle 3 s) – so wird das Licht automatisch grün, sobald
+            // der Nutzer die Installer bestätigt hat, ohne die App neu zu starten.
+            _driversStatusTimer?.Stop();
+            _driversStatusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            _driversStatusTimer.Tick += (s, e) =>
+            {
+                if (_driversInstallPending) return;  // während Installation nicht umschalten
+                UpdateDriversHeaderStatus();
+            };
+            _driversStatusTimer.Start();
+        }
+
+        private DispatcherTimer? _driversStatusTimer;
+        private volatile bool _driversInstallPending;
+
+        private void ChkVigemXboxMain_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_suppressVigemChanged) return;
+
+            bool on = ChkVigemXboxMain.IsChecked == true;
+            _settings.UseVigemXbox = on;
+            SaveSettings();
+
+            // Einmalig pro Sitzung vorschlagen, TenzoraX dauerhaft als Administrator
+            // laufen zu lassen: Die HidHide-Automatik (Gamepad verstecken) und die
+            // Eingabe in erhöhte Spiele funktionieren dann ohne jede UAC-Rückfrage.
+            if (on && !InputSimulator.IsRunningAsAdmin() && !_settings.RunAsAdministrator && !_adminPromptShown)
+            {
+                _adminPromptShown = true;
+                var adminResult = System.Windows.MessageBox.Show(
+                    LanguageManager.Instance.Admin_TogglePrompt,
+                    LanguageManager.Instance.Admin_ToggleTitle,
+                    MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (adminResult == MessageBoxResult.Yes)
+                {
+                    _settings.RunAsAdministrator = true;
+                    SaveSettings();
+                    RestartAsAdmin();
+                    return; // Neustart beendet diesen Prozess (bzw. meldet Abbruch)
+                }
+            }
+
+            bool ok = ControllerManager.Instance.SetVigemXbox(on);
+            UpdateVigemStatusMain();
+
+            // HidHide-Automatik: physischen Controller automatisch verstecken, damit
+            // Spiele nur die virtuelle Xbox 360 sehen (kein Doppel-Input). Beim
+            // Deaktivieren wird das Verstecken wieder aufgehoben. Läuft im Hintergrund,
+            // damit die UI beim Ausführen der CLI nicht blockiert.
+            if (on && ok && VigemXboxBridge.IsDriverInstalled())
+            {
+                var active = GetActiveController();
+                if (active != null && !string.IsNullOrEmpty(active.InstanceId) && !IsLikelyVirtualXbox(active))
+                    ApplyHidHideAuto(true, active.InstanceId);
+            }
+            else if (!on && (_hidhideAutoActive || _hidhideAutoInstanceId != ""))
+            {
+                ApplyHidHideAuto(false, _hidhideAutoInstanceId);
+            }
+
+            if (on && !ok)
+            {
+                if (!VigemXboxBridge.IsDriverInstalled())
+                {
+                    // Lokaler Installer vorhanden? Dann direkt starten, sonst Download-Seite anbieten.
+                    string? local = DriverInstaller.Find(DriverInstaller.ViGEmBusFile);
+                    if (local != null)
+                    {
+                        var result = System.Windows.MessageBox.Show(
+                            LanguageManager.Instance.Vigem_InstallLocalPrompt,
+                            LanguageManager.Instance.Vigem_NoDriverTitle,
+                            MessageBoxButton.YesNo, MessageBoxImage.Question);
+                        if (result == MessageBoxResult.Yes)
+                            DriverInstaller.LaunchInstaller(local);
+                    }
+                    else
+                    {
+                        var result = System.Windows.MessageBox.Show(
+                            LanguageManager.Instance.Vigem_InstallPrompt,
+                            LanguageManager.Instance.Vigem_NoDriverTitle,
+                            MessageBoxButton.YesNo, MessageBoxImage.Question);
+                        if (result == MessageBoxResult.Yes)
+                        {
+                            try { Process.Start(new ProcessStartInfo(VigemXboxBridge.DriverDownloadUrl) { UseShellExecute = true }); }
+                            catch { }
+                        }
+                    }
+                }
+                else
+                {
+                    System.Windows.MessageBox.Show(
+                        LanguageManager.Instance.Vigem_NoDriverMsg,
+                        LanguageManager.Instance.Vigem_NoDriverTitle,
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+        }
+
+        private void BtnOpenHidhideClient_Click(object sender, RoutedEventArgs e)
+        {
+            string? client = FindHidHideClient();
+            if (client == null)
+            {
+                System.Windows.MessageBox.Show(
+                    LanguageManager.Instance.Hidhide_Missing,
+                    LanguageManager.Instance.Hidhide_MissingTitle,
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = client,
+                UseShellExecute = true,
+                // Die HidHide-Konfiguration (Geräte verstecken / erlaubte Apps) benötigt
+                // Administrator-Rechte. Läuft TenzoraX bereits als Admin, entfällt die
+                // erneute UAC-Abfrage.
+                Verb = InputSimulator.IsRunningAsAdmin() ? "" : "runas"
+            };
+            try
+            {
+                Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                // UAC abgebrochen oder Start fehlgeschlagen – nicht mehr still schlucken.
+                System.Windows.MessageBox.Show(
+                    LanguageManager.Instance.Format("Hidhide_LaunchError", ex.Message),
+                    LanguageManager.Instance.Hidhide_MissingTitle,
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// Sucht den HidHide Configuration Client: zuerst im Standard-Installationspfad
+        /// (64- und 32-Bit), dann im Dokumente-Datenordner von TenzoraX („Dokumente\TenzoraX“
+        /// und „Dokumente\TenzoraX\drivers“) und zuletzt über die Registry-Deinstallations-
+        /// einträge. Wichtig: Die Client-Datei kann direkt im Installationsordner ODER im
+        /// Unterordner „x64“/„x86“ liegen – alle Varianten werden geprüft.
+        /// </summary>
+        private static string? FindHidHideClient()
+        {
+            string docRoot = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            var bases = new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                    "Nefarius Software Solutions", "HidHide"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                    "Nefarius Software Solutions", "HidHide"),
+                Path.Combine(docRoot, "TenzoraX"),
+                Path.Combine(docRoot, "TenzoraX", "drivers")
+            };
+            foreach (var baseDir in bases)
+            {
+                var exe = FindHidHideClientInDir(baseDir);
+                if (exe != null) return exe;
+            }
+
+            return FindHidHideClientViaRegistry();
+        }
+
+        /// <summary>Prüft einen Ordner auf HidHideClient.exe – direkt und in den x64/x86-Unterordnern.</summary>
+        private static string? FindHidHideClientInDir(string baseDir)
+        {
+            foreach (var sub in new[] { "", "x64", "x86" })
+            {
+                var p = string.IsNullOrEmpty(sub)
+                    ? Path.Combine(baseDir, "HidHideClient.exe")
+                    : Path.Combine(baseDir, sub, "HidHideClient.exe");
+                if (File.Exists(p)) return p;
+            }
+            return null;
+        }
+
+        /// <summary>Sucht HidHideClient.exe über die Windows-Deinstallations-Registry (64- und 32-Bit-Sicht).</summary>
+        private static string? FindHidHideClientViaRegistry()
+        {
+            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            {
+                try
+                {
+                    using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+                    using var uninstall = baseKey.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall");
+                    if (uninstall == null) continue;
+
+                    foreach (var subName in uninstall.GetSubKeyNames())
+                    {
+                        try
+                        {
+                            using var entry = uninstall.OpenSubKey(subName);
+                            string? displayName = entry?.GetValue("DisplayName") as string;
+                            if (string.IsNullOrEmpty(displayName) ||
+                                displayName.IndexOf("HidHide", StringComparison.OrdinalIgnoreCase) < 0)
+                                continue;
+
+                            string? location = entry?.GetValue("InstallLocation") as string;
+                            if (!string.IsNullOrEmpty(location))
+                            {
+                                var exe = FindHidHideClientInDir(location);
+                                if (exe != null) return exe;
+                            }
+
+                            string? icon = entry?.GetValue("DisplayIcon") as string;
+                            if (!string.IsNullOrEmpty(icon))
+                            {
+                                var iconPath = icon.Split(',')[0].Trim('"');
+                                if (iconPath.EndsWith("HidHideClient.exe", StringComparison.OrdinalIgnoreCase)
+                                    && File.Exists(iconPath))
+                                    return iconPath;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        /// <summary>Aktualisiert das Treiber-Status-Licht in der Kopfzeile.
+        /// Grün: ViGEmBus UND HidHide installiert. Rot: mindestens einer fehlt.
+        /// Grau: Zustand noch unklar (z.B. direkt beim Start).</summary>
+        private void UpdateDriversHeaderStatus()
+        {
+            if (DriversStatusDotHeader == null) return;
+
+            bool vigem = VigemXboxBridge.IsDriverInstalled();
+            bool hidhide = DriverInstaller.IsDriverInstalled("hidhide");
+            bool allOk = vigem && hidhide;
+
+            var color = allOk
+                ? System.Windows.Media.Color.FromRgb(16, 185, 129)    // grün
+                : System.Windows.Media.Color.FromRgb(239, 68, 68);    // rot
+            DriversStatusDotHeader.Fill = new System.Windows.Media.SolidColorBrush(color);
+
+            string tooltip = allOk
+                ? Lang.Drivers_HeaderTooltipOk
+                : LanguageManager.Instance.Format("Drivers_HeaderTooltipMissing",
+                    vigem ? Lang.Drivers_Installed : Lang.Drivers_Missing,
+                    hidhide ? Lang.Drivers_Installed : Lang.Drivers_Missing);
+            BtnDriversHeader.ToolTip = tooltip;
+        }
+
+        /// <summary>Klick auf das Treiber-Status-Licht: fehlende Treiber herunterladen
+        /// und installieren (ViGEmBus + HidHide, je nachdem was fehlt).</summary>
+        private async void BtnDriversHeader_Click(object sender, RoutedEventArgs e)
+        {
+            bool vigem = VigemXboxBridge.IsDriverInstalled();
+            bool hidhide = DriverInstaller.IsDriverInstalled("hidhide");
+
+            if (vigem && hidhide)
+            {
+                System.Windows.MessageBox.Show(Lang.Drivers_HeaderAllInstalled,
+                    Lang.Drivers_CheckTitle, MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                _driversInstallPending = true;
+                var missing = new List<string>();
+                if (!vigem) missing.Add(DriverInstaller.ViGEmBusFile);
+                if (!hidhide) missing.Add(DriverInstaller.HidHideFile);
+
+                // Vor dem Herunterladen einmal prüfen, ob die Setup-Datei evtl. schon
+                // im Treiber-Ordner liegt (z.B. manuell dort abgelegt) – dann reicht
+                // ein Direktstart ohne Download.
+                var toInstall = new List<string>();
+                var toDownload = new List<string>();
+                foreach (var file in missing)
+                {
+                    var existing = DriverInstaller.Find(file);
+                    if (existing != null)
+                        toInstall.Add(existing);
+                    else
+                        toDownload.Add(file);
+                }
+
+                if (toDownload.Count > 0)
+                {
+                    var progress = new Progress<int>(p =>
+                    {
+                        if (DriversStatusDotHeader != null)
+                            DriversStatusDotHeader.Fill = new System.Windows.Media.SolidColorBrush(
+                                System.Windows.Media.Color.FromRgb(245, 158, 11)); // orange: Download läuft
+                    });
+
+                    foreach (var file in toDownload)
+                    {
+                        var path = await DriverInstaller.EnsureDownloadedAsync(file, progress);
+                        if (path == null)
+                        {
+                            System.Windows.MessageBox.Show(
+                                LanguageManager.Instance.Format("Drivers_HeaderDownloadFailed", file),
+                                Lang.Drivers_CheckTitle, MessageBoxButton.OK, MessageBoxImage.Error);
+                            return;
+                        }
+                        toInstall.Add(path);
+                    }
+                }
+
+                // Installer starten (UAC) – einer nach dem anderen.
+                foreach (var setupPath in toInstall)
+                {
+                    DriverInstaller.LaunchInstaller(setupPath);
+                }
+
+                _driversInstallPending = false;
+                UpdateDriversHeaderStatus();
+            }
+            catch (Exception ex)
+            {
+                _driversInstallPending = false;
+                App.LogApp("Treiber-Installation Fehler: " + ex.Message);
+            }
+        }
+
+        private void BtnCheckDrivers_Click(object sender, RoutedEventArgs e)
+        {
+            bool vigem = VigemXboxBridge.IsDriverInstalled();
+            bool hidhide = DriverInstaller.IsDriverInstalled("hidhide");
+            bool admin = InputSimulator.IsRunningAsAdmin();
+
+            // Statusanzeigen im Tab auffrischen.
+            UpdateVigemStatusMain();
+            UpdateHidhideStatusMain();
+            UpdateDriversHeaderStatus();
+
+            string msg = LanguageManager.Instance.Format("Drivers_CheckResult",
+                vigem ? LanguageManager.Instance.Drivers_Installed : LanguageManager.Instance.Drivers_Missing,
+                hidhide ? LanguageManager.Instance.Drivers_Installed : LanguageManager.Instance.Drivers_Missing,
+                admin ? LanguageManager.Instance.Drivers_AdminAvailable : LanguageManager.Instance.Drivers_AdminMissing);
+            System.Windows.MessageBox.Show(msg,
+                LanguageManager.Instance.Drivers_CheckTitle,
+                MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void UpdateVigemStatusMain()
+        {
+            string status = ControllerManager.Instance.VigemStatus;
+            TxtVigemStatusMain.Text = status;
+
+            bool active = ControllerManager.Instance.VigemIsXboxActive;
+            var color = active
+                ? System.Windows.Media.Color.FromRgb(16, 185, 129)   // grün: verbunden
+                : status.StartsWith("ViGEmBus-Treiber")
+                    ? System.Windows.Media.Color.FromRgb(239, 68, 68) // rot: Treiber fehlt
+                    : System.Windows.Media.Color.FromRgb(100, 116, 139); // grau: inaktiv
+
+            VigemStatusDotMain.Fill = new System.Windows.Media.SolidColorBrush(color);
+        }
+
+        private void UpdateHidhideStatusMain()
+        {
+            bool installed = DriverInstaller.IsDriverInstalled("hidhide");
+            if (_hidhideStatusOverride != "")
+            {
+                TxtHidhideStatusMain.Text = _hidhideStatusOverride;
+                HidhideStatusDotMain.Fill = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));
+                return;
+            }
+            if (installed && _hidhideAutoActive)
+            {
+                TxtHidhideStatusMain.Text = LanguageManager.Instance.Hidhide_AutoActive;
+                HidhideStatusDotMain.Fill = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129));
+                return;
+            }
+            TxtHidhideStatusMain.Text = installed
+                ? LanguageManager.Instance.Hidhide_Installed
+                : LanguageManager.Instance.Hidhide_Missing;
+            HidhideStatusDotMain.Fill = new System.Windows.Media.SolidColorBrush(
+                installed
+                    ? System.Windows.Media.Color.FromRgb(16, 185, 129)
+                    : System.Windows.Media.Color.FromRgb(100, 116, 139));
+        }
+
+        /// <summary>
+        /// Wenn die Xbox-360-Spiegelung aktiv ist und TenzoraX NICHT als Administrator
+        /// läuft, weist die App einmalig beim Start darauf hin – ohne Admin-Rechte
+        /// funktionieren weder die HidHide-Automatik noch die Eingabe in Spiele, die
+        /// mit erhöhten Rechten laufen (UIPI-Blockade).
+        /// </summary>
+        private void CheckAdminStartupHint()
+        {
+            if (InputSimulator.IsRunningAsAdmin()) return;
+            if (!_settings.UseVigemXbox) return;
+
+            // Beim Autostart (--minimized, PC-Boot) KEINEN Hinweis-Dialog zeigen:
+            // Der Task-Scheduler startet die App bereits mit höchsten Rechten, und
+            // ein Dialog beim Booten wäre genau das Aufblitzen, das der Nutzer nicht
+            // will. Nur bei manuellem Start (ohne --minimized) hinweisen.
+            if (Environment.GetCommandLineArgs().Contains("--minimized")) return;
+
+            var result = System.Windows.MessageBox.Show(
+                LanguageManager.Instance.Admin_StartupHint,
+                LanguageManager.Instance.Admin_StartupTitle,
+                MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (result == MessageBoxResult.Yes)
+                RestartAsAdmin();
+        }
+
+        private void RestartAsAdmin()
+        {
+            try
+            {
+                var restArgs = Environment.GetCommandLineArgs().Skip(1).ToList();
+                if (!restArgs.Contains("--admin-restart")) restArgs.Add("--admin-restart");
+                var argStr = string.Join(" ", restArgs
+                    .Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
+                var psi = new ProcessStartInfo
+                {
+                    FileName = Environment.ProcessPath,
+                    UseShellExecute = true,
+                    Verb = "runas",
+                    Arguments = argStr
+                };
+                // Process.Start mit runas blockiert, bis der Nutzer die UAC-Abfrage
+                // beantwortet. Erst danach: Mutex freigeben (sonst „abandoned“) und
+                // diese Instanz beenden. Die neue Instanz wartet mit --admin-restart
+                // kurz auf die Freigabe und übernimmt dann sauber.
+                Process.Start(psi);
+                App.ReleaseInstanceMutex();
+                Environment.Exit(0);
+            }
+            catch
+            {
+                System.Windows.MessageBox.Show(
+                    LanguageManager.Instance.Settings_RestartFailed,
+                    LanguageManager.Instance.Dialog_AutostartErrorTitle,
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// Führt die HidHide-Automatik (verstecken/aufheben) im Hintergrund aus. Der
+        /// UI-Zustand wird optimistisch sofort gesetzt; die CLI läuft auf einem
+        /// Hintergrund-Thread, damit der Checkbox-Handler nicht blockiert.
+        /// </summary>
+        private async void ApplyHidHideAuto(bool hide, string instanceId)
+        {
+            _hidhideStatusOverride = "";
+            if (hide)
+            {
+                _hidhideAutoActive = true;
+                _hidhideAutoInstanceId = instanceId;
+            }
+            else
+            {
+                _hidhideAutoActive = false;
+                _hidhideAutoInstanceId = "";
+            }
+            UpdateHidhideStatusMain();
+
+            bool ok;
+            try
+            {
+                ok = await System.Threading.Tasks.Task.Run(() =>
+                    hide ? HidHideAutomation.HideController(instanceId)
+                         : HidHideAutomation.Unhide(instanceId));
+            }
+            catch
+            {
+                ok = false;
+            }
+
+            if (!IsLoaded) return; // Fenster wurde inzwischen geschlossen
+
+            if (!ok && hide)
+            {
+                // Verstecken fehlgeschlagen → Zustand zurücksetzen und Grund anzeigen.
+                _hidhideAutoActive = false;
+                _hidhideAutoInstanceId = "";
+                _hidhideStatusOverride = InputSimulator.IsRunningAsAdmin()
+                    ? LanguageManager.Instance.Hidhide_AutoFailed
+                    : LanguageManager.Instance.Hidhide_AutoNeedsAdmin;
+                UpdateHidhideStatusMain();
+                App.LogApp("HidHide-Automatik fehlgeschlagen (CLI nicht gefunden oder nicht als Administrator ausgeführt).");
+            }
+            else if (ok && hide)
+            {
+                CheckHidHideStillSeesController(instanceId);
+            }
+        }
+
+        /// <summary>
+        /// Start-Wiederherstellung: War die Spiegelung beim letzten Mal aktiv, wird das
+        /// physische Gamepad automatisch wieder versteckt, sobald ein Controller da ist
+        /// (nach Neustart/Update ist sonst nur die Spiegelung, aber nicht das Verstecken aktiv).
+        /// </summary>
+        /// <summary>
+        /// Live-Eingabe-Anzeige im Hauptfenster: aktualisiert ~5×/Sekunde die
+        /// Tasten-/Achsen-Werte des aktiven Controllers (liest nur, blockiert nie).
+        /// </summary>
+        private void StartLiveInputTimer()
+        {
+            var timer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(200)
+            };
+            timer.Tick += (s, e) =>
+            {
+                var cm = ControllerManager.Instance;
+                string buttons = cm.LastPressedSummary;
+                string axes = cm.LastAxesSummary;
+
+                bool active = !string.IsNullOrEmpty(buttons)
+                    || (cm.LastSourceInputAtUtc != DateTime.MinValue
+                        && (DateTime.UtcNow - cm.LastSourceInputAtUtc).TotalMilliseconds < 500);
+
+                TxtLiveButtons.Text = LanguageManager.Instance.Live_ButtonsLabel + " "
+                    + (string.IsNullOrEmpty(buttons) ? "—" : buttons);
+                TxtLiveAxes.Text = LanguageManager.Instance.Live_AxesLabel + " "
+                    + (string.IsNullOrEmpty(axes) ? "—" : axes);
+
+                // Grün = Eingabe kommt gerade an, grau = Leerlauf.
+                var color = active
+                    ? System.Windows.Media.Color.FromRgb(16, 185, 129)
+                    : System.Windows.Media.Color.FromRgb(74, 74, 74);
+                LiveActivityDot.Fill = new System.Windows.Media.SolidColorBrush(color);
+                if (active)
+                {
+                    TxtLiveButtons.Foreground = System.Windows.Media.Brushes.White;
+                    TxtLiveAxes.Foreground = System.Windows.Media.Brushes.White;
+                }
+                else
+                {
+                    TxtLiveButtons.Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush");
+                    TxtLiveAxes.Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush");
+                }
+            };
+            timer.Start();
+        }
+
+        private void StartHidHideRestoreTimer()
+        {
+            if (!_settings.UseVigemXbox || !VigemXboxBridge.IsDriverInstalled()) return;
+
+            _hidhideRestoreTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(1)
+            };
+            _hidhideRestoreTimer.Tick += (s, e) =>
+            {
+                if (!_settings.UseVigemXbox || _hidhideAutoActive)
+                {
+                    _hidhideRestoreTimer.Stop();
+                    return;
+                }
+
+                var active = GetActiveController();
+                if (active == null) return; // noch kein Controller erkannt → weiter warten
+                _hidhideRestoreTimer.Stop();
+                if (string.IsNullOrEmpty(active.InstanceId) || IsLikelyVirtualXbox(active)) return;
+
+                // Ist genau dieses Gerät bereits versteckt (hat einen Neustart
+                // überlebt), ist nichts zu tun – kein unnötiger UAC-Prompt.
+                // Der Lese-Check funktioniert ohne Administrator-Rechte. Ein nur
+                // aktives Cloaking ohne dieses Gerät (z.B. Reste früherer Zustände)
+                // reicht NICHT – dann wird sauber neu versteckt.
+                if (HidHideAutomation.IsDeviceHidden(active.InstanceId))
+                    return;
+                ApplyHidHideAuto(true, active.InstanceId);
+            };
+            _hidhideRestoreTimer.Start();
+        }
+
+        /// <summary>
+        /// Sicherheitsnetz nach dem automatischen Verstecken: Falls HidHide das Gerät
+        /// auch für TenzoraX (Whitelist) ausblendet und der Controller nicht mehr lesbar
+        /// ist, wird das Verstecken automatisch wieder aufgehoben – sonst wäre der
+        /// Controller „weg“, obwohl er verbunden ist.
+        /// </summary>
+        private async void CheckHidHideStillSeesController(string instanceId)
+        {
+            await System.Threading.Tasks.Task.Delay(2500);
+            if (!IsLoaded) return; // Fenster wurde inzwischen geschlossen
+            try
+            {
+                bool stillThere = ControllerManager.Instance.ConnectedControllers
+                    .Any(c => c.InstanceId == instanceId);
+                if (!stillThere && (_hidhideAutoActive || _hidhideAutoInstanceId == instanceId))
+                {
+                    _hidhideAutoActive = false;
+                    _hidhideAutoInstanceId = "";
+                    UpdateHidhideStatusMain();
+                    App.LogApp("HidHide-Sicherheitsnetz: Controller nach dem Verstecken nicht mehr lesbar – Verstecken wieder aufgehoben.");
+                    // CLI im Hintergrund ausführen, damit die UI nicht blockiert.
+                    _ = System.Threading.Tasks.Task.Run(() => HidHideAutomation.Unhide(instanceId));
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>Liefert den aktuell aktiven Controller (oder null, wenn keiner ausgewählt ist).</summary>
+        private DetectedController? GetActiveController()
+        {
+            var list = ControllerManager.Instance.ConnectedControllers;
+            int idx = ControllerManager.Instance.ActiveGamepadIndex;
+            if (idx >= 0 && idx < list.Count) return list[idx];
+            return null;
+        }
+
+        /// <summary>Erkennt den virtuellen ViGEm-Xbox-360-Controller (VID 045E / PID 028E), der niemals versteckt werden darf.</summary>
+        private static bool IsLikelyVirtualXbox(DetectedController c)
+        {
+            return c.VidPid.IndexOf("045E", StringComparison.OrdinalIgnoreCase) >= 0
+                && c.VidPid.IndexOf("028E", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private void BtnInstallHidhideMain_Click(object sender, RoutedEventArgs e)
+        {
+            UpdateHidhideStatusMain();   // ggf. Status nach Installation aktualisieren
+
+            string? local = DriverInstaller.Find(DriverInstaller.HidHideFile);
+            if (local != null)
+            {
+                bool ok = DriverInstaller.LaunchInstaller(local);
+                if (!ok)
+                    System.Windows.MessageBox.Show(
+                        LanguageManager.Instance.Vigem_NoDriverMsg,
+                        LanguageManager.Instance.Vigem_NoDriverTitle,
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo("https://github.com/nefarius/HidHide")
+                    {
+                        UseShellExecute = true
+                    });
+                }
+                catch { }
+            }
+        }
+
+        /// <summary>
+        /// Öffnet das Windows-Fenster "Game Controller" (joy.cpl) mit allen installierten
+        /// Controllern. Wird über den Dateinamen gestartet (nicht über einen lokalisierten
+        /// Menünamen) und funktioniert daher auf allen Windows-Versionen und in jeder Sprache.
+        /// </summary>
+        private void BtnOpenGameControllersMain_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo("joy.cpl") { UseShellExecute = true });
+            }
+            catch { }
+        }
+
+        private void TabsRightPanel_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            // Beim Wechsel auf den Controller-Tab Status frisch anzeigen.
+            if (TabsRightPanel.SelectedItem == TabController)
+            {
+                UpdateVigemStatusMain();
+                UpdateHidhideStatusMain();
+            }
         }
 
         private void ChkEditMode_Checked(object sender, RoutedEventArgs e)
@@ -1574,48 +2582,6 @@ namespace TenzoraX
             }
         }
 
-        private void UpdateAdminUI()
-        {
-            bool isAdmin = InputSimulator.IsRunningAsAdmin();
-            TxtAdminStatus.Text = isAdmin ? Lang.Edit_AdminElevated : Lang.Edit_AdminUser;
-            TxtAdminStatus.Foreground = isAdmin
-                ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(245, 158, 11))
-                : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(148, 163, 184));
-            ChkAdminMode.IsChecked = _settings.RunAsAdministrator;
-        }
-
-        private void ChkAdminMode_Click(object sender, RoutedEventArgs e)
-        {
-            bool newValue = ChkAdminMode.IsChecked == true;
-            _settings.RunAsAdministrator = newValue;
-            SaveSettings();
-
-            if (newValue && !InputSimulator.IsRunningAsAdmin())
-            {
-                var result = System.Windows.MessageBox.Show(Lang.Dialog_RestartAsAdminMsg, Lang.Dialog_RestartAsAdminTitle, MessageBoxButton.YesNo, MessageBoxImage.Question);
-                if (result == MessageBoxResult.Yes)
-                {
-                    try
-                    {
-                        var argStr = string.Join(" ", Environment.GetCommandLineArgs().Skip(1)
-                            .Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
-                        var psi = new ProcessStartInfo
-                        {
-                            FileName = Environment.ProcessPath,
-                            UseShellExecute = true,
-                            Verb = "runas",
-                            Arguments = argStr
-                        };
-                        Process.Start(psi);
-                        Environment.Exit(0);
-                    }
-                    catch
-                    {
-                        System.Windows.MessageBox.Show("Failed to restart as administrator.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                    }
-                }
-            }
-        }
 
         private void BtnResetControllerImage_Click(object sender, RoutedEventArgs e)
         {
@@ -1630,47 +2596,6 @@ namespace TenzoraX
             }
         }
 
-        private void ChkAutostart_Changed(object sender, RoutedEventArgs e)
-        {
-            _settings.AutostartEnabled = ChkAutostart.IsChecked == true;
-            SaveSettings();
-            SetAutostartRegistry(_settings.AutostartEnabled);
-        }
-
-        private void ChkStartMinimized_Changed(object sender, RoutedEventArgs e)
-        {
-            _settings.StartMinimized = ChkStartMinimized.IsChecked == true;
-            SaveSettings();
-        }
-
-        private void ChkMinimizeToTray_Changed(object sender, RoutedEventArgs e)
-        {
-            _settings.MinimizeToTray = ChkMinimizeToTray.IsChecked == true;
-            SaveSettings();
-        }
-
-        private void SetAutostartRegistry(bool enable)
-        {
-            try
-            {
-                string keyName = "TenzoraX";
-                string exePath = Process.GetCurrentProcess().MainModule?.FileName ?? "";
-                if (string.IsNullOrEmpty(exePath)) return;
-
-                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
-                if (key != null)
-                {
-                    if (enable)
-                        key.SetValue(keyName, $"\"{exePath}\" --minimized");
-                    else
-                        key.DeleteValue(keyName, false);
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Windows.MessageBox.Show(Lang.Format("Dialog_AutostartErrorMsg", ex.Message), Lang.Dialog_AutostartErrorTitle, MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
 
         #endregion
 
@@ -1749,6 +2674,17 @@ namespace TenzoraX
 
             contextMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
+            var pauseItem = new System.Windows.Forms.ToolStripMenuItem(
+                ProfileManager.IsPaused ? Lang.Tray_Resume : Lang.Tray_Pause,
+                null,
+                (s, e) => TogglePause())
+            {
+                Checked = ProfileManager.IsPaused
+            };
+            contextMenu.Items.Add(pauseItem);
+
+            contextMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
             var exitItem = new System.Windows.Forms.ToolStripMenuItem(Lang.Tray_Exit, null, (s, e) =>
             {
                 _isExplicitClose = true;
@@ -1792,11 +2728,41 @@ namespace TenzoraX
                 return;
             }
 
+            // 0. HidHide-Automatik: Verstecken beim Beenden wieder aufheben, damit
+            //    das physische Gamepad danach überall normal funktioniert.
+            if (_hidhideAutoActive || _hidhideAutoInstanceId != "")
+            {
+                if (InputSimulator.IsRunningAsAdmin())
+                {
+                    // Als Admin: synchron und schnell, kein UAC nötig.
+                    try { HidHideAutomation.Unhide(_hidhideAutoInstanceId); } catch { }
+                }
+                else
+                {
+                    // Ohne Admin: Aufheben anstoßen, ohne zu warten – der UAC-Dialog
+                    // kann erscheinen, während TenzoraX bereits schließt. Der erhöhte
+                    // cmd-Prozess arbeitet unabhängig weiter; bricht der Nutzer die
+                    // Abfrage ab, bleibt das Verstecken bestehen (per HidHide-Client
+                    // oder beim nächsten Umschalten aufhebbar).
+                    try
+                    {
+                        _ = System.Threading.Tasks.Task.Run(() => HidHideAutomation.Unhide(_hidhideAutoInstanceId));
+                    }
+                    catch { }
+                }
+                _hidhideAutoActive = false;
+                _hidhideAutoInstanceId = "";
+                _hidhideStatusOverride = "";
+            }
+
             // 1. Stop controller polling
             try { ControllerManager.Instance.Shutdown(); } catch { }
 
             // 2. Stop battery timer
             try { _batteryTimer?.Stop(); _batteryTimer = null; } catch { }
+
+            // 2b. Stop driver status timer
+            try { _driversStatusTimer?.Stop(); _driversStatusTimer = null; } catch { }
 
             // 3. Save window position, size and settings
             SaveWindowPosition();
@@ -1824,18 +2790,33 @@ namespace TenzoraX
                 try { _batteryIcon.Dispose(); _batteryIcon = null; } catch { }
             }
 
+            // 5b. Dispose cached controller icon (SystemIcons.Application gehört
+            //     dem System – die darf nicht disposet werden).
+            if (_controllerIcon != null && !ReferenceEquals(_controllerIcon, SystemIcons.Application))
+            {
+                try { _controllerIcon.Dispose(); } catch { }
+                _controllerIcon = null;
+            }
+
             // 6. Mark clean shutdown – nothing needed (crash detection uses crash.log)
             App.LogApp("TenzoraX wird beendet");
         }
 
         private void BtnSettings_Click(object sender, RoutedEventArgs e)
         {
-            var win = new SettingsWindow(_settings, () => SaveSettings());
+            var win = new SettingsWindow(_settings, () => SaveSettings(), ApplyLanguage);
             win.ShowDialog();
+            // Wiederauswahl-Modus ggf. in den Einstellungen geändert → sofort übernehmen.
+            ControllerManager.Instance.ReselectMode = _settings.ControllerReselectMode;
         }
 
         private System.Drawing.Icon CreateControllerIcon()
         {
+            // Gecachtes Icon wiederverwenden: Jede Erzeugung kostet GDI-Handles,
+            // die bei häufigen Aufrufen (bis 120×/s bei getrenntem Controller)
+            // sonst geleakt würden → GDI+-Erschöpfung, „A generic error occurred in GDI+".
+            if (_controllerIcon != null) return _controllerIcon;
+
             try
             {
                 var uri = new Uri("pack://application:,,,/assets/icons/app.ico", UriKind.RelativeOrAbsolute);
@@ -1844,31 +2825,42 @@ namespace TenzoraX
                 {
                     using (var stream = streamInfo.Stream)
                     {
-                        return new System.Drawing.Icon(stream);
+                        _controllerIcon = new System.Drawing.Icon(stream);
+                        return _controllerIcon;
                     }
                 }
             }
             catch { }
 
-            // Fallback: draw a simple placeholder icon
-            using (var bmp = new System.Drawing.Bitmap(32, 32))
-            using (var g = System.Drawing.Graphics.FromImage(bmp))
+            // Fallback: draw a simple placeholder icon. Komplett abgesichert – auch
+            // hier kann GDI+ bei Handle-Erschöpfung werfen (GetHicon).
+            try
             {
-                g.Clear(System.Drawing.Color.Transparent);
-                g.FillRectangle(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(40, 40, 50)), 4, 10, 24, 14);
-                g.FillEllipse(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(0, 210, 255)), 12, 14, 8, 8);
-                var hIcon = bmp.GetHicon();
-                try
+                using (var bmp = new System.Drawing.Bitmap(32, 32))
+                using (var g = System.Drawing.Graphics.FromImage(bmp))
                 {
-                    // Clone copies the handle before the bitmap disposes it; original is released explicitly
-                    var clone = System.Drawing.Icon.FromHandle(hIcon).Clone();
-                    return (System.Drawing.Icon)clone;
-                }
-                finally
-                {
-                    DestroyIcon(hIcon);
+                    g.Clear(System.Drawing.Color.Transparent);
+                    g.FillRectangle(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(40, 40, 50)), 4, 10, 24, 14);
+                    g.FillEllipse(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(0, 210, 255)), 12, 14, 8, 8);
+                    var hIcon = bmp.GetHicon();
+                    try
+                    {
+                        // Clone copies the handle before the bitmap disposes it; original is released explicitly
+                        var clone = System.Drawing.Icon.FromHandle(hIcon).Clone();
+                        _controllerIcon = (System.Drawing.Icon)clone;
+                        return _controllerIcon;
+                    }
+                    finally
+                    {
+                        DestroyIcon(hIcon);
+                    }
                 }
             }
+            catch { }
+
+            // Letzter Fallback: System-Icon statt Crash (nie disposen!).
+            _controllerIcon = SystemIcons.Application;
+            return _controllerIcon;
         }
 
         private ImageSource CreateControllerIconSource()
@@ -1887,27 +2879,43 @@ namespace TenzoraX
                 }
             }
             catch { }
-            // Fallback: draw a simple placeholder
-            using (var bmp = new System.Drawing.Bitmap(32, 32))
-            using (var g = System.Drawing.Graphics.FromImage(bmp))
+
+            // Fallback: draw a simple placeholder (komplett abgesichert)
+            try
             {
-                g.Clear(System.Drawing.Color.Transparent);
-                g.FillRectangle(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(40, 40, 50)), 4, 10, 24, 14);
-                g.FillEllipse(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(0, 210, 255)), 12, 14, 8, 8);
-                var hIcon = bmp.GetHicon();
-                try
+                using (var bmp = new System.Drawing.Bitmap(32, 32))
+                using (var g = System.Drawing.Graphics.FromImage(bmp))
                 {
-                    return Imaging.CreateBitmapSourceFromHIcon(hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-                }
-                finally
-                {
-                    DestroyIcon(hIcon);
+                    g.Clear(System.Drawing.Color.Transparent);
+                    g.FillRectangle(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(40, 40, 50)), 4, 10, 24, 14);
+                    g.FillEllipse(new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(0, 210, 255)), 12, 14, 8, 8);
+                    var hIcon = bmp.GetHicon();
+                    try
+                    {
+                        return Imaging.CreateBitmapSourceFromHIcon(hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                    }
+                    finally
+                    {
+                        DestroyIcon(hIcon);
+                    }
                 }
             }
+            catch { }
+
+            // Letzter Fallback: System-Icon als BitmapSource
+            try
+            {
+                return Imaging.CreateBitmapSourceFromHIcon(SystemIcons.Application.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+            }
+            catch { }
+            return null!;
         }
 
         private void HideToTray(bool showTip)
         {
+            // ShowInTaskbar aus, damit das versteckte Fenster NICHT als minimiertes
+            // Icon in der Taskleiste hängen bleibt (nur im Tray sichtbar).
+            try { ShowInTaskbar = false; } catch { }
             Hide();
             if (showTip && _notifyIcon != null)
                 _notifyIcon.ShowBalloonTip(2000, "TenzoraX", Lang.Tray_BalloonText, System.Windows.Forms.ToolTipIcon.Info);
@@ -1915,9 +2923,23 @@ namespace TenzoraX
 
         private void RestoreFromTray()
         {
+            // Normalen Zustand wiederherstellen: Taskleisten-Eintrag aktivieren und
+            // das Fenster per Win32 SW_RESTORE normal (nicht minimiert) zeigen.
+            // WICHTIG: Die Reihenfolge Show() -> WindowState=Normal. Setzt man den
+            // Zustand VOR Show(), bleibt ein beim Start minimiert erzeugtes Fenster
+            // hartnäckig minimiert (WPF wendet den Zustand erst nach dem Anzeigen an).
+            try { ShowInTaskbar = true; } catch { }
+            Show();
             if (WindowState == WindowState.Minimized)
                 WindowState = WindowState.Normal;
-            Show();
+            // Zusätzlich natives SW_RESTORE als Sicherheitsnetz (9 = SW_RESTORE).
+            try
+            {
+                var hwnd = new WindowInteropHelper(this).Handle;
+                if (hwnd != IntPtr.Zero)
+                    ShowWindow(hwnd, 9);
+            }
+            catch { }
             Activate();
         }
 

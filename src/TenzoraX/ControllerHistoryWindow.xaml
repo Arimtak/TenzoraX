@@ -1,0 +1,88 @@
+<Window x:Class="TenzoraX.ControllerHistoryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="TenzoraX - Controller-Verlauf"
+        Width="520" Height="420"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        Background="{StaticResource BgBrush}"
+        Foreground="{StaticResource TextBrush}">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="🕘 Controller-Verlauf" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" Content="🗑 Alles löschen" Height="28" Padding="8,0" FontSize="11" Click="BtnClearAll_Click" Background="#3A2020" Foreground="#E08080" BorderBrush="#5A3030" BorderThickness="1" Margin="0,0,6,0" VerticalAlignment="Center"/>
+            <Button Grid.Column="2" Content="✕" Width="28" Height="28" Padding="0" FontSize="11" Click="BtnClose_Click" Background="#2A2A38" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
+        </Grid>
+
+        <ListView x:Name="LstHistory" Grid.Row="1"
+                  Background="{StaticResource PanelBgBrush}"
+                  BorderBrush="{StaticResource BorderBrush}"
+                  BorderThickness="1"
+                  Foreground="{StaticResource TextBrush}"
+                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    <Setter Property="Margin" Value="0,0,0,2"/>
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="BorderThickness" Value="0"/>
+                    <Style.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Background" Value="{StaticResource ButtonHoverBrush}"/>
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <Border Background="{StaticResource PanelBgBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10" Margin="4">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="{StaticResource TextBrush}" FontSize="13"/>
+                                    <TextBlock Text="{Binding ConnectionDisplay}" Margin="8,0,0,0" Foreground="{StaticResource AccentBrush}" FontSize="11" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding DetailLine}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,3,0,0"/>
+                                <TextBlock Text="{Binding VidPid}" Foreground="#5B6577" FontSize="10" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <Button Grid.Column="1" Content="✕" Width="24" Height="24" Padding="0" FontSize="10"
+                                    Click="BtnDeleteEntry_Click" Tag="{Binding StableId}"
+                                    Background="Transparent" Foreground="#666" BorderThickness="0"
+                                    VerticalAlignment="Center" Margin="6,0,0,0" Cursor="Hand"
+                                    ToolTip="Eintrag löschen">
+                                <Button.Style>
+                                    <Style TargetType="Button">
+                                        <Setter Property="Foreground" Value="#666"/>
+                                        <Style.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="Foreground" Value="#E08080"/>
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <TextBlock x:Name="TxtEmpty" Grid.Row="1" Text="Noch kein Verlauf." Foreground="{StaticResource MutedTextBrush}"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" Visibility="Collapsed"/>
+    </Grid>
+</Window>
