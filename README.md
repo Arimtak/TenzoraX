@@ -1,50 +1,56 @@
 # TenzoraX
 
-TenzoraX wandelt deine Controller-Eingaben in Tastatur- und Maus-Aktionen um – z. B. für Spiele, Emulatoren oder eigene Tastenkombinationen.
+TenzoraX turns your game controller into keyboard and mouse actions – great for games, emulators, or your own custom shortcuts.
 
-Kostenlos und frei nutzbar für alle (MIT-Lizenz).
+Free to use for everyone (MIT license).
+
+![TenzoraX screenshot](screenshot.png)
 
 ---
 
 ## Installation
 
-1. Lade die neueste Version von [Releases](https://github.com/Arimtak/TenzoraX/releases) herunter.
-2. Entpacke die ZIP an einen beliebigen Ort.
-3. Starte `TenzoraX.exe` – es ist keine Installation nötig.
+1. Download the latest version from [Releases](https://github.com/Arimtak/TenzoraX/releases).
+2. Extract the ZIP to any folder.
+3. Run `TenzoraX.exe` – no installation required.
 
-> Hinweis: Die ZIP enthält nur die App. Die benötigten Treiber werden von der App selbst heruntergeladen (siehe unten).
+> Note: The ZIP contains only the app. The required drivers are downloaded by the app itself (see below).
 
-## Treiber installieren
+## Installing the drivers
 
-Beim ersten Start ist oben rechts im Fenster ein **Status-Punkt** sichtbar:
+On first launch you'll see a **status dot** in the top-right of the window:
 
-- 🔴 **Rot** = Treiber fehlen → einmal darauf klicken.
-- 🟢 **Grün** = Treiber sind installiert – alles fertig.
+- 🔴 **Red** = drivers are missing → click it once.
+- 🟢 **Green** = drivers are installed – everything is ready.
 
-Die App lädt dann die Treiber (ViGEmBus + HidHide) automatisch nach `Dokumente\TenzoraX\drivers` und startet die Installation.
+The app then downloads the drivers (ViGEmBus + HidHide) automatically to `Documents\TenzoraX\drivers` and starts the installation.
 
-## Benutzung
+## Usage
 
-1. Controller anschließen (USB, Bluetooth oder 2,4 GHz).
-2. Im Hauptfenster auf eine Taste des Gamepads klicken (z. B. A, B, LB, RB …).
-3. Rechts die gewünschte Tastenkombination oder Maus-Aktion zuweisen.
-4. Mit **Speichern** sichern – fertig.
+1. Connect your controller (USB, Bluetooth, or 2.4 GHz).
+2. In the main window, click a button on the gamepad (e.g. A, B, LB, RB …).
+3. Assign the desired key combination or mouse action on the right.
+4. Click **Save** – done.
 
-Weitere Funktionen:
+More features:
 
-- 🕘 **Verlauf** – zeigt alle jemals erkannten Controller.
-- 🔍 **Diagnose** – prüft, ob Eingaben ankommen.
-- 🎮 **Controller-Icon oben** – öffnet das Windows-„Game Controller“-Fenster.
-- **Tray-Icon** – zeigt den Batteriestand deines Controllers.
+- 🕘 **History** – shows every controller ever detected.
+- 🔍 **Diagnostics** – checks whether inputs are being received.
+- 🎮 **Controller icon in the header** – opens the Windows "Game Controllers" window.
+- **Tray icon** – shows your controller's battery level.
 
-## Daten
+## Data
 
-Alle Einstellungen, Profile und Logs liegen unter `Dokumente\TenzoraX\`.
+All settings, profiles, and logs are stored under `Documents\TenzoraX\`.
 
-## Systemanforderungen
+## System requirements
 
-- Windows 10 oder neuer (64-Bit)
+- Windows 10 or newer (64-bit)
 
-## Lizenz
+## Built with AI assistance
 
-MIT – siehe [LICENSE](LICENSE). Du darfst die Software frei nutzen, verändern und teilen.
+This hobby project was developed with AI-assisted programming. All code was reviewed, tested, and integrated by the developer.
+
+## License
+
+MIT – see [LICENSE](LICENSE). You are free to use, modify, and share this software.
