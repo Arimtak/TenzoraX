@@ -1,37 +1,50 @@
-# TenzoraX – Modern Controller Mapper
-[![C#](https://img.shields.io/badge/C%23-12.0-blue)](https://learn.microsoft.com/dotnet/csharp) [![WPF](https://img.shields.io/badge/WPF-.NET%208.0-green)](https://learn.microsoft.com/dotnet/desktop/wpf) [![Windows](https://img.shields.io/badge/Windows-10%2B-lightgrey)](https://www.microsoft.com/windows) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+# TenzoraX
 
-TenzoraX converts gamepad inputs into keyboard/mouse actions. Supports gaming, emulators, and custom hotkey combinations.
+TenzoraX wandelt deine Controller-Eingaben in Tastatur- und Maus-Aktionen um – z. B. für Spiele, Emulatoren oder eigene Tastenkombinationen.
 
-## Features
-| Category | Features |
-|----------|----------|
-| Controller | XInput, DirectInput, auto-detection, hot-plugging |
-| Mapping | Visual button mapping, multi-button combos, keyboard/mouse output |
-| Keys | A–Z, 0–9, F1–F24, F13–F24, CTRL/ALT/SHIFT/WIN, mouse, numpad |
-| Profiles | Save/load configurations |
-| UI | Battery indicator, hotkey notifications, sound feedback, DE/EN |
-| System | System tray, Windows autostart, update system, persisted window |
+Kostenlos und frei nutzbar für alle (MIT-Lizenz).
 
-## Install
-Download from [Releases](https://github.com/Arimtak/TenzoraX/releases), extract ZIP, run `TenzoraX.exe`. Config saved to `Documents\TenzoraX\`.
+---
 
-## Example
-```
-L1 + SELECT → F13
-START       → SHIFT + TAB
-A           → SPACE
-```
+## Installation
 
-## Tech Stack
-**C# · .NET 8 · WPF · Windows**
+1. Lade die neueste Version von [Releases](https://github.com/Arimtak/TenzoraX/releases) herunter.
+2. Entpacke die ZIP an einen beliebigen Ort.
+3. Starte `TenzoraX.exe` – es ist keine Installation nötig.
 
-```bash
-dotnet build
-```
+> Hinweis: Die ZIP enthält nur die App. Die benötigten Treiber werden von der App selbst heruntergeladen (siehe unten).
 
-## AI-Assisted Development
-Hobby project developed with AI-assisted programming. All code reviewed, tested, and integrated by the developer.
+## Treiber installieren
 
-## License
-MIT – see [LICENSE](LICENSE).
+Beim ersten Start ist oben rechts im Fenster ein **Status-Punkt** sichtbar:
+
+- 🔴 **Rot** = Treiber fehlen → einmal darauf klicken.
+- 🟢 **Grün** = Treiber sind installiert – alles fertig.
+
+Die App lädt dann die Treiber (ViGEmBus + HidHide) automatisch nach `Dokumente\TenzoraX\drivers` und startet die Installation.
+
+## Benutzung
+
+1. Controller anschließen (USB, Bluetooth oder 2,4 GHz).
+2. Im Hauptfenster auf eine Taste des Gamepads klicken (z. B. A, B, LB, RB …).
+3. Rechts die gewünschte Tastenkombination oder Maus-Aktion zuweisen.
+4. Mit **Speichern** sichern – fertig.
+
+Weitere Funktionen:
+
+- 🕘 **Verlauf** – zeigt alle jemals erkannten Controller.
+- 🔍 **Diagnose** – prüft, ob Eingaben ankommen.
+- 🎮 **Controller-Icon oben** – öffnet das Windows-„Game Controller“-Fenster.
+- **Tray-Icon** – zeigt den Batteriestand deines Controllers.
+
+## Daten
+
+Alle Einstellungen, Profile und Logs liegen unter `Dokumente\TenzoraX\`.
+
+## Systemanforderungen
+
+- Windows 10 oder neuer (64-Bit)
+
+## Lizenz
+
+MIT – siehe [LICENSE](LICENSE). Du darfst die Software frei nutzen, verändern und teilen.
