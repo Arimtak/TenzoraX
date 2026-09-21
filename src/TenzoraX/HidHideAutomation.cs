@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 
@@ -81,58 +82,37 @@ namespace TenzoraX
         }
 
         /// <summary>
-        /// Führt einen HidHideCLI-Befehl aus. Die CLI verarbeitet den Befehl sofort
-        /// (per IOCTL) und bleibt nur wegen ihres interaktiven Konsolen-Modus offen.
-        /// Wird stdin geschlossen (EOF), beendet sie sich nach dem Befehl selbst
-        /// (verifiziert: --version und --cloak-state mit gepipetem stdin, Exit-Code 0).
-        ///
-        /// Läuft TenzoraX als Admin, wird die CLI direkt mit geschlossenem stdin
-        /// gestartet (kein Fenster, sauberes Ende). Läuft TenzoraX NICHT als Admin,
-        /// wird sie einmalig erhöht gestartet (ein UAC-Prompt pro Umschaltvorgang)
-        /// über den Wrapper "cmd /c echo. | <cli> <args>": Das echo. liefert leeres
-        /// stdin, die CLI führt aus und beendet sich selbst, cmd ebenfalls – es
-        /// entstehen keine verwaisten erhöhten Prozesse. Bricht der Nutzer die
-        /// UAC-Abfrage ab, wirft Process.Start eine Win32Exception → false.
+        /// Führt einen einzelnen HidHideCLI-Befehl direkt aus – nur für den Fall, dass
+        /// TenzoraX bereits als Administrator läuft. Ohne Admin-Rechte läuft alles über
+        /// <see cref="RunCliBatch"/> in einem einzigen erhöhten Aufruf. Die CLI verarbeitet
+        /// den Befehl sofort (per IOCTL) und bleibt nur wegen ihres interaktiven
+        /// Konsolen-Modus offen; geschlossenes stdin (EOF) beendet sie nach dem Befehl
+        /// selbst (verifiziert: --version/--cloak-state mit gepipetem stdin, Exit-Code 0).
         /// </summary>
         private static bool RunCli(string? cliPath, string arguments, int waitMs = 1500)
         {
             if (string.IsNullOrEmpty(cliPath) || !File.Exists(cliPath)) return false;
             try
             {
-                if (InputSimulator.IsRunningAsAdmin())
+                var psi = new ProcessStartInfo
                 {
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = cliPath,
-                        Arguments = arguments,
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                        RedirectStandardInput = true,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true
-                    };
-                    using var p = Process.Start(psi);
-                    if (p == null) return false;
-                    p.StandardInput.Close(); // EOF → CLI beendet sich nach dem Befehl
-                    if (!p.WaitForExit(waitMs))
-                    {
-                        try { p.Kill(); } catch { }
-                        return false;
-                    }
-                    return true;
-                }
-
-                // Nicht-Admin: einmalig erhöht starten (UAC-Prompt).
-                var psi2 = new ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = "/c \"echo. | \"" + cliPath + "\" " + arguments + "\"",
-                    UseShellExecute = true,
-                    Verb = "runas"
+                    FileName = cliPath,
+                    Arguments = arguments,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
                 };
-                using var p2 = Process.Start(psi2);
-                if (p2 == null) return false;
-                return p2.WaitForExit(waitMs * 3);
+                using var p = Process.Start(psi);
+                if (p == null) return false;
+                p.StandardInput.Close(); // EOF → CLI beendet sich nach dem Befehl
+                if (!p.WaitForExit(waitMs))
+                {
+                    try { p.Kill(); } catch { }
+                    return false;
+                }
+                return true;
             }
             catch
             {
@@ -141,43 +121,201 @@ namespace TenzoraX
         }
 
         /// <summary>
+        /// Führt mehrere CLI-Befehle aus. Wichtig: Alle Befehle laufen in EINEM
+        /// erhöhten cmd.exe-Aufruf (also ein einziger UAC-Dialog), denn ein Pad hat
+        /// leicht 10 Schnittstellen – einzeln erhöht gestartet käme pro Schnittstelle
+        /// eine eigene UAC-Abfrage. Läuft TenzoraX bereits als Admin, werden die
+        /// Befehle direkt ausgeführt.
+        ///
+        /// Rückgabe = Erfolg des LETZTEN Befehls (das ist immer der kritische:
+        /// --cloak-on bzw. --cloak-off). allOk meldet, ob zusätzlich alle Vorbereitungs-
+        /// Befehle (-app-reg, -dev-hide) gelungen sind; einzelne Fehlschläge dort
+        /// werden geloggt, brechen den Vorgang aber nicht ab.
+        /// </summary>
+        private static bool RunCliBatch(string? cliPath, IReadOnlyList<string> commands, out bool allOk, int waitMs = 1500)
+        {
+            allOk = false;
+            if (string.IsNullOrEmpty(cliPath) || commands.Count == 0) return false;
+            if (!File.Exists(cliPath)) return false;
+
+            if (InputSimulator.IsRunningAsAdmin())
+            {
+                bool anyFailed = false, lastOk = false;
+                foreach (var command in commands)
+                {
+                    lastOk = RunCli(cliPath, command, waitMs);
+                    if (!lastOk)
+                    {
+                        anyFailed = true;
+                        App.LogApp("HidHide: Befehl fehlgeschlagen: " + command);
+                    }
+                }
+                allOk = !anyFailed;
+                return lastOk;
+            }
+
+            // Ohne Admin: alle Befehle in einem erhöhten cmd-Aufruf verketten. Das
+            // echo. liefert der CLI leeres stdin (sie beendet sich nach dem Befehl
+            // selbst); der Exit-Code von cmd ist der des letzten Befehls.
+            try
+            {
+                var chain = new System.Text.StringBuilder();
+                foreach (var command in commands)
+                {
+                    if (chain.Length > 0) chain.Append(" & ");
+                    chain.Append("echo. | \"").Append(cliPath).Append("\" ").Append(command);
+                }
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = "/c \"" + chain + "\"",
+                    UseShellExecute = true,
+                    Verb = "runas",
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+                using var p = Process.Start(psi);
+                if (p == null) return false;
+
+                bool exited = p.WaitForExit(waitMs * 3 + commands.Count * 400);
+                allOk = exited && p.ExitCode == 0;
+                return allOk;
+            }
+            catch
+            {
+                // Nutzer hat den UAC-Dialog abgebrochen oder cmd ließ sich nicht starten.
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Versteckt den physischen Controller vor allen Apps und erlaubt TenzoraX.exe,
         /// das Gerät weiter zu lesen. Reihenfolge wichtig: erst die App freigeben
-        /// (--app-reg), dann das Gerät verstecken (--dev-hide) und Cloaking aktivieren.
+        /// (--app-reg), dann die Geräte verstecken (--dev-hide) und Cloaking aktivieren.
         /// Vorher werden versehentlich hinterlassene leere Einträge (z.B. "   ") aus der
         /// versteckten Geräteliste entfernt – sie verursachen sonst unnötige UAC-Prompts
         /// und ein irreführendes Cloaking ohne sichtbaren Effekt.
         /// </summary>
         public static bool HideController(string instanceId)
         {
-            string? cli = FindCli();
-            if (cli == null || string.IsNullOrWhiteSpace(instanceId)) return false;
-
-            CleanInvalidHiddenEntries(cli);
-
-            string appPath = Process.GetCurrentProcess().MainModule?.FileName ?? "";
-            bool ok = true;
-            if (!string.IsNullOrEmpty(appPath))
-                ok &= RunCli(cli, "--app-reg \"" + appPath + "\"");
-            ok &= RunCli(cli, "--dev-hide \"" + instanceId + "\"");
-            ok &= RunCli(cli, "--cloak-on");
-            return ok;
+            if (string.IsNullOrWhiteSpace(instanceId)) return false;
+            return HideController(new[] { instanceId });
         }
 
-        /// <summary>Hebt das Verstecken wieder auf (Gerät abwählen + Cloaking deaktivieren).</summary>
-        public static bool Unhide(string instanceId)
+        /// <summary>
+        /// Versteckt ALLE Schnittstellen eines physischen Controllers. Ein Pad hängt
+        /// oft als Composite-Gerät mit mehreren Schnittstellen am Bus (XInput, HID,
+        /// zweiter Composite-Zweig) – würde nur ein Pfad versteckt, bliebe der
+        /// Controller über die übrigen Schnittstellen sichtbar (Doppel-Input).
+        /// Die Aufzählung liefert <see cref="TenzoraX.Detection.PhysicalDeviceResolver"/>.
+        /// Ergebnis: true, wenn das Cloaking aktiviert wurde (nur dann sind die Geräte
+        /// für andere Programme wirklich unsichtbar); einzeln fehlgeschlagene Pfade
+        /// werden protokolliert, brechen den Vorgang aber nicht ab.
+        /// </summary>
+        public static bool HideController(IReadOnlyCollection<string>? instanceIds)
         {
+            var ids = Normalize(instanceIds);
+            if (ids.Count == 0) return false;
+            return ApplyDeviceState(ids, Array.Empty<string>(), cloakOn: true);
+        }
+
+        /// <summary>
+        /// Stellt einen gewünschten Sichtbarkeits-Zustand in EINEM Arbeitsgang her:
+        /// neue Geräte verstecken, nicht mehr benötigte freigeben und Cloaking an/aus.
+        ///
+        /// Diese Zustands-Abstimmung wird von der Spiegelung genutzt,
+        /// damit sie sich nicht gegenseitig die Geräte wieder freigeben – wer gerade
+        /// versteckt sein soll, ergibt sich aus den aktiven Optionen, nicht aus der
+        /// Reihenfolge der Klicks.
+        /// </summary>
+        public static bool ApplyDeviceState(IReadOnlyCollection<string>? hide, IReadOnlyCollection<string>? unhide, bool cloakOn)
+        {
+            var hideIds = Normalize(hide);
+            var unhideIds = Normalize(unhide);
+
             string? cli = FindCli();
             if (cli == null) return false;
 
-            CleanInvalidHiddenEntries(cli);
+            // Reihenfolge zählt: erst aufräumen, dann die App freigeben (nur nötig, wenn
+            // etwas versteckt wird), dann Geräte verstecken/freigeben – und zuletzt
+            // Cloaking (das ist der kritische Befehl).
+            var commands = BuildCleanupCommands(cli);
+            if (hideIds.Count > 0)
+            {
+                string appPath = Process.GetCurrentProcess().MainModule?.FileName ?? "";
+                if (!string.IsNullOrEmpty(appPath))
+                    commands.Add("--app-reg \"" + appPath + "\"");
+            }
+            foreach (var id in hideIds)
+                commands.Add("--dev-hide \"" + id + "\"");
+            foreach (var id in unhideIds)
+                commands.Add("--dev-unhide \"" + id + "\"");
+            commands.Add(cloakOn ? "--cloak-on" : "--cloak-off");
 
-            bool ok = true;
-            if (!string.IsNullOrEmpty(instanceId))
-                ok &= RunCli(cli, "--dev-unhide \"" + instanceId + "\"");
-            ok &= RunCli(cli, "--cloak-off");
+            bool ok = RunCliBatch(cli, commands, out bool allOk);
+            App.LogApp("HidHide: +" + hideIds.Count + " versteckt, -" + unhideIds.Count
+                       + " freigegeben, Cloaking=" + cloakOn
+                       + " (alle Befehle ok: " + allOk + ", Ergebnis: " + ok + ")");
             return ok;
         }
+
+        /// <summary>Hebt das Verstecken wieder auf (Gerät(e) abwählen + Cloaking deaktivieren).</summary>
+        public static bool Unhide(string instanceId)
+        {
+            return Unhide(string.IsNullOrWhiteSpace(instanceId) ? Array.Empty<string>() : new[] { instanceId });
+        }
+
+        /// <summary>
+        /// Hebt das Verstecken für alle übergebenen Schnittstellen auf. Eine leere
+        /// Liste ist zulässig und schaltet nur das Cloaking ab (z.B. um Reste
+        /// früherer Läufe zu beseitigen).
+        /// </summary>
+        public static bool Unhide(IReadOnlyCollection<string>? instanceIds)
+            => ApplyDeviceState(Array.Empty<string>(), instanceIds ?? Array.Empty<string>(), cloakOn: false);
+
+        /// <summary>
+        /// True, wenn wirklich ALLE übergebenen Schnittstellen in HidHide als versteckt
+        /// eingetragen sind. Reine Leseoperation (ein CLI-Aufruf). Wird beim Start
+        /// verwendet, damit ein halb verstecktes Gerät (nur eine von zwei
+        /// Schnittstellen) NICHT als "schon erledigt" gilt.
+        /// </summary>
+        public static bool AreAllDevicesHidden(IReadOnlyCollection<string>? instanceIds)
+        {
+            var ids = Normalize(instanceIds);
+            if (ids.Count == 0) return false;
+
+            var hidden = ListHiddenDevices();
+            foreach (var id in ids)
+            {
+                bool found = false;
+                foreach (var entry in hidden)
+                {
+                    if (string.Equals(entry, id, StringComparison.OrdinalIgnoreCase)) { found = true; break; }
+                }
+                if (!found) return false;
+            }
+            return true;
+        }
+
+        /// <summary>Bereinigt Eingaben: trimmen, Leereinträge und Duplikate entfernen (Groß-/Kleinschreibung egal).</summary>
+        private static List<string> Normalize(IReadOnlyCollection<string>? instanceIds)
+        {
+            var result = new List<string>();
+            if (instanceIds == null) return result;
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var raw in instanceIds)
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                string id = raw.Trim();
+                if (seen.Add(id)) result.Add(id);
+                if (result.Count >= MaxInterfacesPerHide) break; // Schutz vor absurden Listen
+            }
+            return result;
+        }
+
+        /// <summary>Obergrenze pro Verstecken-Vorgang (ein Pad hat typisch 2–8 Schnittstellen).</summary>
+        private const int MaxInterfacesPerHide = 16;
 
         /// <summary>
         /// Liest die aktuell in HidHide als versteckt eingetragenen Geräte-Instanzpfade
@@ -246,20 +384,24 @@ namespace TenzoraX
         }
 
         /// <summary>
-        /// Entfernt ungültige (nur-Whitespace) Einträge aus der versteckten Geräteliste
-        /// von HidHide. Solche Einträge entstehen z.B. durch fehlgeschlagene frühere
-        /// Aufrufe mit leerem Instanzpfad und aktivieren Cloaking ohne jeden Effekt.
+        /// Liefert die Befehle, die ungültige (nur-Whitespace) Einträge aus HidHides
+        /// versteckter Geräteliste entfernen. Solche Einträge entstehen z.B. durch
+        /// fehlgeschlagene frühere Aufrufe mit leerem Instanzpfad und aktivieren Cloaking
+        /// ohne jeden Effekt. Die Befehle laufen im selben Batch wie der eigentliche
+        /// Vorgang – so kostet das Aufräumen keinen zusätzlichen UAC-Dialog.
         /// </summary>
-        private static void CleanInvalidHiddenEntries(string cli)
+        private static List<string> BuildCleanupCommands(string cli)
         {
+            var commands = new List<string>();
             List<string> entries;
             try { entries = ListHiddenDevices(cli); }
-            catch { return; }
+            catch { return commands; }
             foreach (var entry in entries)
             {
                 if (string.IsNullOrWhiteSpace(entry))
-                    RunCli(cli, "--dev-unhide \"" + entry + "\"");
+                    commands.Add("--dev-unhide \"" + entry + "\"");
             }
+            return commands;
         }
 
         /// <summary>

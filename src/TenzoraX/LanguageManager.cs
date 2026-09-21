@@ -49,6 +49,12 @@ namespace TenzoraX
         public string Battery_Label => this["Battery_Label"];
         public string Battery_NA => this["Battery_NA"];
         public string Battery_Low => this["Battery_Low"];
+        public string Battery_Charging => this["Battery_Charging"];
+        public string Battery_LastSeen => this["Battery_LastSeen"];
+        public string Battery_AgeMinutes => this["Battery_AgeMinutes"];
+        public string Battery_AgeHours => this["Battery_AgeHours"];
+        public string Battery_AgeDays => this["Battery_AgeDays"];
+        public string Battery_JustNow => this["Battery_JustNow"];
         public string Combo_NoController => this["Combo_NoController"];
         public string Status_AccessError => this["Status_AccessError"];
         public string Input_Label => this["Input_Label"];
@@ -102,6 +108,16 @@ namespace TenzoraX
         public string Edit_AdminUser => this["Edit_AdminUser"];
         public string Edit_AdminElevated => this["Edit_AdminElevated"];
 
+        public string Background_Section => this["Background_Section"];
+        public string Background_EnableTitle => this["Background_EnableTitle"];
+        public string Background_EnableHint => this["Background_EnableHint"];
+        public string Background_QualityLabel => this["Background_QualityLabel"];
+        public string Background_QualityAuto => this["Background_QualityAuto"];
+        public string Background_QualityFull => this["Background_QualityFull"];
+        public string Background_QualityReduced => this["Background_QualityReduced"];
+        public string Background_QualityMinimal => this["Background_QualityMinimal"];
+        public string Background_QualityHint => this["Background_QualityHint"];
+
         public string Battery_Title => this["Battery_Title"];
         public string Battery_Enable => this["Battery_Enable"];
         public string Battery_HoursLabel => this["Battery_HoursLabel"];
@@ -138,6 +154,7 @@ namespace TenzoraX
 
         public string Diag_Button => this["Diag_Button"];
         public string Diag_Title => this["Diag_Title"];
+        public string Diag_Endpoints => this["Diag_Endpoints"];
 
         public string Sound_Enable => this["Sound_Enable"];
         public string Sound_VolumeLabel => this["Sound_VolumeLabel"];
@@ -263,6 +280,12 @@ namespace TenzoraX
                 ["Battery_Label"] = "Battery:",
                 ["Battery_NA"] = "N/A",
                 ["Battery_Low"] = "⚠ Battery low!",
+                ["Battery_Charging"] = "⚡ Charging",
+                ["Battery_LastSeen"] = "{0}% ({1} ago)",
+                ["Battery_AgeMinutes"] = "{0} min",
+                ["Battery_AgeHours"] = "{0} h",
+                ["Battery_AgeDays"] = "{0} d",
+                ["Battery_JustNow"] = "just now",
                 ["Combo_NoController"] = "No controller detected",
                 ["Status_AccessError"] = "Detected, but access not possible",
                 ["Input_Label"] = "Input:",
@@ -318,6 +341,16 @@ namespace TenzoraX
                 ["Edit_AdminUser"] = "● User",
                 ["Edit_AdminElevated"] = "● Administrator",
 
+                ["Background_Section"] = "🎛 APPEARANCE",
+                ["Background_EnableTitle"] = "Animated background (GhostFibers)",
+                ["Background_EnableHint"] = "Draws a slow-moving field of glowing fibers behind the interface (GPU pixel shader). Turning it off saves power in battery mode.",
+                ["Background_QualityLabel"] = "Quality",
+                ["Background_QualityAuto"] = "Automatic (measured)",
+                ["Background_QualityFull"] = "Full - 30 fps, 4 fiber layers",
+                ["Background_QualityReduced"] = "Economy - 20 fps, 3 layers",
+                ["Background_QualityMinimal"] = "Minimal - 15 fps, 2 layers, no grain",
+                ["Background_QualityHint"] = "Automatic makes the background cheaper instead of switching it off when the display cannot keep up: first fewer fiber layers and fewer frames per second, and only as a last resort off.",
+
                 ["Battery_Title"] = "Battery",
                 ["Battery_Enable"] = "Battery system",
                 ["Battery_HoursLabel"] = "Estimated battery life",
@@ -372,6 +405,7 @@ namespace TenzoraX
                 ["Btn_TestOutput"] = "Test output",
                 ["Diag_Button"] = "Controller diagnostics",
                 ["Diag_Title"] = "Controller diagnostics",
+                ["Diag_Endpoints"] = "Input endpoints (live)",
                 ["Sound_Enable"] = "Sound feedback on output",
                 ["Sound_VolumeLabel"] = "Volume:",
                 ["OutputMode_Label"] = "Output mode:",
@@ -498,6 +532,12 @@ namespace TenzoraX
                 ["Battery_Label"] = "Batterie:",
                 ["Battery_NA"] = "N/A",
                 ["Battery_Low"] = "⚠ Akku niedrig!",
+                ["Battery_Charging"] = "⚡ Lädt",
+                ["Battery_LastSeen"] = "{0}% (vor {1})",
+                ["Battery_AgeMinutes"] = "{0} min",
+                ["Battery_AgeHours"] = "{0} h",
+                ["Battery_AgeDays"] = "{0} T",
+                ["Battery_JustNow"] = "gerade eben",
                 ["Combo_NoController"] = "Kein Controller erkannt",
                 ["Status_AccessError"] = "Erkannt, aber Zugriff nicht möglich",
                 ["Input_Label"] = "Eingabe:",
@@ -553,6 +593,16 @@ namespace TenzoraX
                 ["Edit_AdminUser"] = "● Benutzer",
                 ["Edit_AdminElevated"] = "● Administrator",
 
+                ["Background_Section"] = "🎛 OBERFLÄCHE",
+                ["Background_EnableTitle"] = "Animierter Hintergrund (GhostFibers)",
+                ["Background_EnableHint"] = "Zeichnet ein langsam ziehendes Feld leuchtender Fasern hinter der Oberfläche (GPU-Pixel-Shader). Ausschalten spart Strom im Akkubetrieb.",
+                ["Background_QualityLabel"] = "Qualität",
+                ["Background_QualityAuto"] = "Automatisch (gemessen)",
+                ["Background_QualityFull"] = "Voll – 30 Bilder/s, 4 Faserschichten",
+                ["Background_QualityReduced"] = "Sparsam – 20 Bilder/s, 3 Schichten",
+                ["Background_QualityMinimal"] = "Minimal – 15 Bilder/s, 2 Schichten, ohne Grain",
+                ["Background_QualityHint"] = "Automatisch macht den Hintergrund sparsamer, statt ihn abzuschalten, wenn die Anzeige nicht mitkommt: erst weniger Faserschichten und weniger Bilder/s, zuletzt ganz aus.",
+
                 ["Battery_Title"] = "Batterie",
                 ["Battery_Enable"] = "Batterie-System",
                 ["Battery_HoursLabel"] = "Geschätzte Akkulaufzeit",
@@ -607,6 +657,7 @@ namespace TenzoraX
                 ["Btn_TestOutput"] = "Testausgabe",
                 ["Diag_Button"] = "Controller-Diagnose",
                 ["Diag_Title"] = "Controller-Diagnose",
+                ["Diag_Endpoints"] = "Eingabe-Endpunkte (live)",
                 ["Sound_Enable"] = "Sound-Feedback bei Ausgabe",
                 ["Sound_VolumeLabel"] = "Lautstärke:",
                 ["OutputMode_Label"] = "Ausgabemodus:",

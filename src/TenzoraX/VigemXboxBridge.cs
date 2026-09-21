@@ -37,6 +37,25 @@ namespace TenzoraX
         }
 
         /// <summary>
+        /// XInput-Slot (0–3) des virtuellen Pads, -1 wenn keiner verbunden ist.
+        ///
+        /// Nur Slot 0 bedeutet: Auch Spiele, die ausschließlich Slot 0 abfragen, finden
+        /// den virtuellen Controller.
+        /// </summary>
+        public int UserIndex
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    if (!_connected || _pad == null) return -1;
+                    try { return _pad.UserIndex; }
+                    catch { return -1; }
+                }
+            }
+        }
+
+        /// <summary>
         /// Versucht, den virtuellen Controller zu verbinden. Liefert bei fehlendem
         /// ViGEmBus-Treiber false (kein Crash) und setzt Status entsprechend.
         /// </summary>
@@ -58,6 +77,10 @@ namespace TenzoraX
                     _connected = true;
                     _lastApplyAt = DateTime.UtcNow;
                     Status = "Verbunden (Xbox 360 virtuell)";
+
+                    // Slot 0 ist die einzige Nummer, die auch Spiele ohne Slot-Suche bedienen.
+                    try { App.LogApp("ViGEm: virtuelles Pad verbunden – XInput-Slot " + _pad.UserIndex); }
+                    catch { }
                     return true;
                 }
                 catch (VigemBusNotFoundException)

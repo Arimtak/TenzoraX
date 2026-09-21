@@ -77,6 +77,14 @@ namespace TenzoraX
         public double BatteryActiveMinutes { get; set; } = 0;
         public bool BatteryTrayEnabled { get; set; } = true;
         public bool BatteryAnimationEnabled { get; set; } = true;
+        /// <summary>Ob der animierte GhostFibers-Hintergrund läuft (GPU-Pixel-Shader).</summary>
+        public bool AnimatedBackgroundEnabled { get; set; } = true;
+        /// <summary>
+        /// Erzwingt eine Stufe des Hintergrunds: 0 = automatisch (nach gemessenem Anzeigetakt),
+        /// 1 = minimal (2 Faserschichten, ohne Grain), 2 = sparsam (3 Schichten),
+        /// 3 = voll (4 Schichten, wie im Original).
+        /// </summary>
+        public int BackgroundQualityOverride { get; set; } = 0;
         public double WindowWidth { get; set; } = 1180;
         public double WindowHeight { get; set; } = 720;
         public double WindowLeft { get; set; } = double.NaN;
@@ -168,6 +176,32 @@ namespace TenzoraX
         // angezeigt (Timer darf ihn nicht überschreiben) und welcher Prozentwert.
         private bool _showingRealBattery = false;
         private int? _realBatteryPercent = null;
+
+        // Lade-Erkennung (Kabel oder nachweislich steigender Wert) und der letzte
+        // gemessene Stand: Wird bei ausgeschaltetem Controller geladen, kommt gar kein
+        // Wert an – dann steht der letzte bekannte Wert mit Alter statt „N/A“.
+        private readonly Detection.BatteryChargeDetector _chargeDetector = new Detection.BatteryChargeDetector();
+        private Detection.BatteryChargeState _lastRenderedCharge = Detection.BatteryChargeState.Unknown;
+        private int? _lastSeenBatteryPercent = null;
+        private DateTime _lastSeenBatteryAt = DateTime.MinValue;
+        private bool _chargeFlowActive = false;
+
+        // Animierter Hintergrund (GhostFibers): Zeit wird nur weitergezählt, solange das
+        // Fenster sichtbar ist – im Tray oder minimiert kostet er nichts.
+        private Effects.GhostFibersEffect? _backgroundEffect;
+        private bool _backgroundLoopHooked = false;
+        private DateTime _backgroundNextFrameAt = DateTime.MinValue;
+        private DateTime _backgroundLastFrameAt = DateTime.MinValue;
+        private double _backgroundElapsedSeconds = 0;
+        private readonly Effects.BackgroundPerformancePolicy _backgroundPolicy = new();
+        private Effects.BackgroundQuality _backgroundQualityLogged = Effects.BackgroundQuality.Full;
+        private DateTime _backgroundActivityLoggedAt = DateTime.MinValue;
+        private int _backgroundDrawnSinceLog = 0;
+        private bool _backgroundResolutionReady = false;
+        private System.Windows.Point _backgroundEffectResolution = new(1, 1);
+        private DispatcherTimer? _trayChargeTimer;
+        private int _trayChargePhase = 0;
+        private readonly Dictionary<int, System.Drawing.Icon[]> _trayChargeFrames = new();
 
         public MainWindow()
         {
@@ -388,6 +422,20 @@ namespace TenzoraX
             // Auto-save window size/position during resize/move (crash-safe persistence)
             SizeChanged += (s, e) => { if (_settingsLoaded) SaveWindowPosition(); };
             StateChanged += (s, e) => { if (_settingsLoaded) { _settings.WindowMaximized = WindowState == WindowState.Maximized; SaveSettings(); } };
+
+            // Animierter Hintergrund: Größe mitführen und im Tray/minimiert anhalten.
+            ApplyBackgroundSetting();
+            SizeChanged += (s, e) => UpdateBackgroundResolution();
+            IsVisibleChanged += (s, e) =>
+            {
+                if (IsVisible && WindowState != WindowState.Minimized) StartBackgroundAnimation();
+                else StopBackgroundAnimation();
+            };
+            StateChanged += (s, e) =>
+            {
+                if (WindowState == WindowState.Minimized) StopBackgroundAnimation();
+                else if (IsVisible) StartBackgroundAnimation();
+            };
 
             // Check for updates after everything is ready
             Dispatcher.BeginInvoke(new Action(async () =>
@@ -1044,6 +1092,24 @@ namespace TenzoraX
 
                 // Echter Akku (HID-Report / XInput) hat Vorrang vor der berechneten Schätzung.
                 bool hasRealBattery = !string.IsNullOrEmpty(e.BatteryInfo) && e.BatteryInfo != "N/A";
+                int? realPercent = null;
+                if (hasRealBattery && int.TryParse(e.BatteryInfo.TrimEnd('%'),
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out int parsedPercent))
+                    realPercent = parsedPercent;
+
+                // Lade-Erkennung: Kabel (XInput BATTERY_TYPE_WIRED) oder ein nachweislich
+                // steigender Akkuwert. Ist der Controller weg, wird nichts behauptet.
+                if (e.ControllerName == "None")
+                    _chargeDetector.Reset();
+                else
+                    _chargeDetector.Observe(DateTime.UtcNow, realPercent, e.OnCable);
+
+                if (realPercent is int measuredPercent)
+                {
+                    _lastSeenBatteryPercent = measuredPercent;
+                    _lastSeenBatteryAt = DateTime.UtcNow;
+                }
 
                 if (e.ControllerName == "None")
                 {
@@ -1055,16 +1121,6 @@ namespace TenzoraX
                     {
                         SetStatusText(Lang.Status_Disconnected, System.Windows.Media.Brushes.Gray);
                     }
-                    // Controller weg → kein echter Wert mehr. Bei aktivierter berechneter
-                    // Batterie übernimmt der 1-s-Timer die Schätzung; sonst „N/A“. Der
-                    // Leerlauf darf die Anzeige nicht im Sekundentakt flackern lassen.
-                    _showingRealBattery = false;
-                    _realBatteryPercent = null;
-                    UpdateBatteryLowWarning();
-                    // Tray auf Schätzung/Standard zurücksetzen (echter Wert ist weg).
-                    ApplyBatteryToTray();
-                    if (!_settings.BatteryEnabled && !hasRealBattery)
-                        TxtBattery.Text = Lang.Battery_NA;
                 }
                 else
                 {
@@ -1072,38 +1128,19 @@ namespace TenzoraX
                 }
 
                 // Batterie nur bei tatsächlicher Änderung aktualisieren (ändert sich
-                // nur ~1×/Sekunde – nicht bei jedem der 250 Polls pro Sekunde).
-                if (e.BatteryInfo != _lastRenderedBattery)
+                // nur ~1×/Sekunde – nicht bei jedem der 250 Polls pro Sekunde). Auch ein
+                // reiner Zustandswechsel (Kabel rein/raus) muss neu zeichnen, obwohl der
+                // Prozentwert gleich bleibt.
+                if (e.BatteryInfo != _lastRenderedBattery || _chargeDetector.State != _lastRenderedCharge)
                 {
+                    if (_chargeDetector.State != _lastRenderedCharge)
+                        App.LogApp("Akku-Status: " + _chargeDetector.State
+                            + (_chargeDetector.LastRealPercent is int loggedPercent ? " (" + loggedPercent + "%)" : "")
+                            + (e.OnCable ? " [USB]" : ""));
+
                     _lastRenderedBattery = e.BatteryInfo;
-                    if (hasRealBattery)
-                    {
-                        // Echter Wert (HID/XInput) – anzeigen statt der Schätzung.
-                        // WICHTIG: Auch den Tray aktualisieren – der Timer (Schätzung)
-                        // wird bei echtem Akku übersprungen, sonst bliebe das Tray-
-                        // Icon/Tooltip auf dem alten Schätzwert (z.B. 100 %) stehen.
-                        _showingRealBattery = true;
-                        _realBatteryPercent = int.TryParse(e.BatteryInfo.TrimEnd('%'), out int pct) ? pct : null;
-                        TxtBattery.Text = e.BatteryInfo;
-                        UpdateBatteryBar(e.BatteryInfo);
-                        ApplyBatteryToTray();
-                    }
-                    else if (!_settings.BatteryEnabled)
-                    {
-                        // Kein echter Wert, Schätzung aus → klassische XInput-Anzeige (auch „N/A“).
-                        _showingRealBattery = false;
-                        _realBatteryPercent = null;
-                        TxtBattery.Text = e.BatteryInfo;
-                        UpdateBatteryBar(e.BatteryInfo);
-                    }
-                    else
-                    {
-                        // Kein echter Wert, Schätzung an → sofort den Timer-Wert zeigen.
-                        _showingRealBattery = false;
-                        _realBatteryPercent = null;
-                        UpdateCalculatedBatteryBar();
-                    }
-                    UpdateBatteryLowWarning();
+                    _lastRenderedCharge = _chargeDetector.State;
+                    RefreshBatteryDisplay(realPercent);
                 }
 
                 foreach (var pair in _gamepadButtonsUi)
@@ -1205,48 +1242,140 @@ namespace TenzoraX
                 : System.Windows.Visibility.Collapsed;
         }
 
-        private void UpdateBatteryBar(string batteryInfo)
+        /// <summary>
+        /// Zeichnet den Akku-Balken. Negative Werte (kein Wert bekannt) lassen ihn
+        /// leer und grau. Die Farbschwellen kommen aus <see cref="BatteryColorFor"/> –
+        /// eine Quelle für Fenster und Tray.
+        /// </summary>
+        private void UpdateBatteryBar(double percent)
         {
-            // Echte Werte kommen als „NN%“ (HID/XInput). Beliebige Prozentwerte
-            // werden direkt auf Balkenbreite und Farbe abgebildet; „N/A“ = leer.
-            double percent = -1;
-            if (batteryInfo != null && batteryInfo.EndsWith("%"))
-            {
-                if (double.TryParse(batteryInfo[..^1], System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out double p))
-                    percent = Math.Clamp(p, 0, 100);
-            }
-
-            double widthFraction;
-            System.Windows.Media.Brush color;
             if (percent < 0)
             {
-                widthFraction = 0;
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(100, 100, 100));
+                BatteryLevel.Width = 2;
+                BatteryLevel.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(100, 100, 100));
+                return;
             }
-            else if (percent > 60)
+
+            double clamped = Math.Clamp(percent, 0, 100);
+            BatteryLevel.Width = Math.Max(2, 22 * Math.Max(0.05, clamped / 100.0));
+            BatteryLevel.Background = new System.Windows.Media.SolidColorBrush(BatteryColorFor(clamped));
+        }
+
+        /// <summary>Farbe des Akku-Balkens – Schwellen an einer Stelle.</summary>
+        private static System.Windows.Media.Color BatteryColorFor(double percent) =>
+            percent > 60 ? System.Windows.Media.Color.FromRgb(16, 185, 129)
+            : percent > 30 ? System.Windows.Media.Color.FromRgb(245, 158, 11)
+            : percent > 10 ? System.Windows.Media.Color.FromRgb(251, 146, 60)
+            : System.Windows.Media.Color.FromRgb(239, 68, 68);
+
+        /// <summary>
+        /// Zeichnet den Akku-Bereich neu. Reihenfolge der Aussagekraft: echter Messwert →
+        /// Timer-Schätzung → letzter bekannter Wert mit Altersangabe → „N/A“.
+        /// </summary>
+        private void RefreshBatteryDisplay(int? realPercent)
+        {
+            if (realPercent is int measured)
             {
-                widthFraction = percent / 100.0;
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129));
+                // Echter Wert (HID/XInput) – anzeigen statt der Schätzung.
+                _showingRealBattery = true;
+                _realBatteryPercent = measured;
+                TxtBattery.Text = measured + "%";
+                UpdateBatteryBar(measured);
             }
-            else if (percent > 30)
+            else if (_settings.BatteryEnabled)
             {
-                widthFraction = percent / 100.0;
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(245, 158, 11));
+                // Kein echter Wert, Schätzung an → sofort den Timer-Wert zeigen.
+                _showingRealBattery = false;
+                _realBatteryPercent = null;
+                UpdateCalculatedBatteryBar();
             }
-            else if (percent > 10)
+            else if (_lastSeenBatteryPercent is int lastSeen)
             {
-                widthFraction = percent / 100.0;
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(251, 146, 60));
+                // Kein aktueller Wert, aber ein früherer: nicht „N/A“, sondern der letzte
+                // gemessene Stand mit Alter – genau der Fall „Laden bei ausgeschaltetem
+                // Controller“, in dem gar kein Gerät mehr existiert.
+                _showingRealBattery = false;
+                _realBatteryPercent = null;
+                TxtBattery.Text = FormatLastSeenBattery(lastSeen);
+                UpdateBatteryBar(lastSeen);
             }
             else
             {
-                widthFraction = Math.Max(0.05, percent / 100.0);
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));
+                _showingRealBattery = false;
+                _realBatteryPercent = null;
+                TxtBattery.Text = Lang.Battery_NA;
+                UpdateBatteryBar(-1);
             }
 
-            BatteryLevel.Width = Math.Max(2, 22 * widthFraction);
-            BatteryLevel.Background = color;
+            ApplyChargeVisuals();
+            UpdateBatteryLowWarning();
+            // Tray/Tooltip mitziehen – der 1-s-Timer wird bei echtem Akku übersprungen.
+            ApplyBatteryToTray();
+        }
+
+        /// <summary>
+        /// Der letzte gemessene Akkustand mit Altersangabe – damit die Anzeige nicht
+        /// leer wirkt, wenn gerade kein Gerät meldet (z.B. Laden bei ausgeschaltetem Pad).
+        /// </summary>
+        private string FormatLastSeenBattery(int percent)
+        {
+            TimeSpan age = DateTime.UtcNow - _lastSeenBatteryAt;
+            string when = age.TotalMinutes < 1 ? Lang.Battery_JustNow
+                        : age.TotalMinutes < 60 ? Lang.Format("Battery_AgeMinutes", (int)age.TotalMinutes)
+                        : age.TotalHours < 24 ? Lang.Format("Battery_AgeHours", (int)age.TotalHours)
+                        : Lang.Format("Battery_AgeDays", (int)age.TotalDays);
+            return Lang.Format("Battery_LastSeen", percent, when);
+        }
+
+        /// <summary>Aktuell anzuzeigender Prozentwert: echt vor Schätzung vor letztem Stand.</summary>
+        private double CurrentBatteryPercent()
+        {
+            if (_realBatteryPercent is int real) return real;
+            if (_settings.BatteryEnabled) return GetCalculatedBatteryPercent();
+            if (_lastSeenBatteryPercent is int seen) return seen;
+            return 0;
+        }
+
+        /// <summary>
+        /// Kennzeichnung und Animation des Ladens. Es gibt keine Animation ohne Beleg:
+        /// nur ein steigender Akkuwert gilt als Ladung. XInputs BATTERY_TYPE_WIRED ist
+        /// dafür untauglich – er stimmt am Kabel **und** über den Funkempfänger.
+        /// </summary>
+        private void ApplyChargeVisuals()
+        {
+            // „Lädt“ nur bei nachgewiesenem Anstieg des Akkuwerts. Eine bloße USB-Verbindung
+            // ist kein Ladungsbeweis – der 2,4-GHz-Empfänger ist selbst USB (gemessen am
+            // 13.09.2026: dasselbe Pad meldet kabellos wie am Kabel BATTERY_TYPE_WIRED).
+            bool charging = _chargeDetector.State == Detection.BatteryChargeState.Charging;
+            TxtChargeState.Text = charging ? Lang.Battery_Charging : "";
+            TxtChargeState.Visibility = charging
+                ? System.Windows.Visibility.Visible
+                : System.Windows.Visibility.Collapsed;
+
+            bool animate = charging && _settings.BatteryAnimationEnabled;
+            ChargeFlow.Visibility = animate
+                ? System.Windows.Visibility.Visible
+                : System.Windows.Visibility.Collapsed;
+            if (animate) StartChargeFlow(); else StopChargeFlow();
+        }
+
+        /// <summary>Wandernder Lichtstreifen im Akku-Balken (WPF-Storyboard, kein Timer).</summary>
+        private void StartChargeFlow()
+        {
+            if (_chargeFlowActive) return;
+            _chargeFlowActive = true;
+            var anim = new System.Windows.Media.Animation.DoubleAnimation(-6, 22, TimeSpan.FromSeconds(1.2))
+            {
+                RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever
+            };
+            ChargeFlowShift.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, anim);
+        }
+
+        private void StopChargeFlow()
+        {
+            if (!_chargeFlowActive) return;
+            _chargeFlowActive = false;
+            ChargeFlowShift.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, null);
         }
 
         #region Battery Tracking
@@ -1270,7 +1399,9 @@ namespace TenzoraX
 
             bool isActive = (DateTime.UtcNow - _lastBatteryInputTime).TotalSeconds < BatteryActiveTimeoutSeconds;
 
-            if (isActive)
+            // Am Kabel bzw. beim Laden fließt kein Akkustrom – dann darf der Timer nicht
+            // herunterzählen, sonst steht nach einer Ladung ein Wert da, den es nicht gibt.
+            if (isActive && Detection.BatteryEstimate.ShouldCountActivity(_chargeDetector.State))
             {
                 _settings.BatteryActiveMinutes += 1.0 / 60.0;
                 SaveSettings();
@@ -1280,7 +1411,22 @@ namespace TenzoraX
 
             // Echter Akku (HID/XInput) wird gerade angezeigt – die Schätzung darf
             // den Wert nicht überschreiben.
-            if (_showingRealBattery) return;
+            if (_showingRealBattery)
+            {
+                // ... aber sie wird auf den gemessenen Stand nachgezogen, damit sie beim
+                // nächsten Wechsel (Pad weg, keine echten Werte mehr) nicht mit einem
+                // alten Verbrauch weiterläuft.
+                if (_realBatteryPercent is int measured)
+                {
+                    double target = Detection.BatteryEstimate.MinutesForPercent(measured, _settings.BatteryHours);
+                    if (Math.Abs(target - _settings.BatteryActiveMinutes) > 0.5)
+                    {
+                        _settings.BatteryActiveMinutes = target;
+                        SaveSettings();
+                    }
+                }
+                return;
+            }
             UpdateCalculatedBatteryBar();
         }
 
@@ -1297,24 +1443,227 @@ namespace TenzoraX
         private void UpdateCalculatedBatteryBar()
         {
             double percent = GetCalculatedBatteryPercent();
-            string batteryInfo = $"{percent:F1}%";
-            TxtBattery.Text = batteryInfo;
-
-            double widthFraction = percent / 100.0;
-            System.Windows.Media.Brush color;
-            if (percent > 60)
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129));
-            else if (percent > 30)
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(245, 158, 11));
-            else if (percent > 10)
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(251, 146, 60));
-            else
-                color = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));
-
-            BatteryLevel.Width = Math.Max(2, 22 * widthFraction);
-            BatteryLevel.Background = color;
-
+            TxtBattery.Text = $"{percent:F1}%";
+            UpdateBatteryBar(percent);
             ApplyBatteryToTray();
+        }
+
+        #endregion
+
+        #region Animated Background (GhostFibers)
+
+        /// <summary>
+        /// Übernimmt die Hintergrund-Einstellung: Effekt sichtbar/aus und Animationsschleife
+        /// an/aus. Ist der Shader nicht verfügbar, bleibt der flache Hintergrund – das
+        /// Fenster funktioniert in jedem Fall.
+        /// </summary>
+        private void ApplyBackgroundSetting()
+        {
+            _backgroundEffect = GhostFibersBackground.Effect as Effects.GhostFibersEffect;
+
+            bool wanted = _settings.AnimatedBackgroundEnabled && _backgroundEffect != null;
+
+            // Absicherung: Hardware-Beschleunigung, Stromversorgung und die native
+            // Bildwiederholrate des Bildschirms stehen sofort fest; die gemessenen Anzeigetakte
+            // entscheiden später über Drosselung oder Abschaltung.
+            _backgroundPolicy.ForcedQuality = _settings.BackgroundQualityOverride;
+            _backgroundPolicy.Initialize(IsOnBattery(), WpfRenderTier);
+            _backgroundActivityLoggedAt = DateTime.MinValue;
+            _backgroundDrawnSinceLog = 0;
+            bool enabled = wanted && _backgroundPolicy.Enabled;
+
+            GhostFibersBackground.Visibility = enabled
+                ? System.Windows.Visibility.Visible
+                : System.Windows.Visibility.Collapsed;
+
+            if (!enabled)
+            {
+                StopBackgroundAnimation();
+                if (wanted) LogBackgroundQuality(force: true);
+                return;
+            }
+
+            _backgroundResolutionReady = true;
+            ApplyBackgroundShaderCost();
+            UpdateBackgroundResolution();
+            LogBackgroundQuality(force: true);
+            if (IsVisible && WindowState != WindowState.Minimized) StartBackgroundAnimation();
+        }
+
+        /// <summary>
+        /// Übergibt die Flächengröße in **Gerätepixeln** an den Shader (nicht in DIP), sonst würde
+        /// das Fasermuster mit der Windows-Zoomstufe größer oder kleiner werden.
+        /// </summary>
+        private void UpdateBackgroundResolution()
+        {
+            if (_backgroundEffect == null || !_backgroundResolutionReady) return;
+
+            var dpi = VisualTreeHelper.GetDpi(this);
+            _backgroundEffectResolution = new System.Windows.Point(
+                Math.Max(1, ActualWidth * dpi.DpiScaleX),
+                Math.Max(1, ActualHeight * dpi.DpiScaleY));
+            _backgroundEffect.Resolution = _backgroundEffectResolution;
+        }
+
+        /// <summary>
+        /// Übergibt die Rechenarbeit der aktuellen Stufe an den Shader: Anzahl der Faserschichten
+        /// und Grain. Das ist der Hebel, der in WPF nachweislich GPU-Zeit spart – jede Schicht
+        /// kostet einen Wellen-, Polar-, <c>pow(…,16)</c>- und Glow-Durchlauf je Pixel, und Grain
+        /// fünf zusätzliche Hashes.
+        ///
+        /// Eine echte Auflösungsreduktion wurde am 13.09.2026 gemessen und verworfen: eine
+        /// Skalierung des Elements spart nichts (9,5 % gegen 9,4 % GPU), <c>BitmapCache(0.5)</c>
+        /// ebenso (9,5 %), und der Weg über eine klein gerenderte Fläche mit VisualBrush sparte in
+        /// der App nichts (4,6–4,8 % gegen 4,8 %). Feste Width/Height auf dieser Fläche machten es
+        /// sogar teurer als volle Auflösung (12,5 % gegen 7,3 %).
+        /// </summary>
+        private void ApplyBackgroundShaderCost()
+        {
+            if (_backgroundEffect == null) return;
+            _backgroundEffect.Layers = _backgroundPolicy.Layers;
+            _backgroundEffect.Grain = _backgroundPolicy.Grain;
+        }
+
+        private void StartBackgroundAnimation()
+        {
+            if (_backgroundEffect == null || _backgroundLoopHooked) return;
+            _backgroundNextFrameAt = DateTime.MinValue;
+            _backgroundLastFrameAt = DateTime.MinValue;
+            _backgroundActivityLoggedAt = DateTime.MinValue;
+            _backgroundDrawnSinceLog = 0;
+            CompositionTarget.Rendering += OnBackgroundRendering;
+            _backgroundLoopHooked = true;
+        }
+
+        private void StopBackgroundAnimation()
+        {
+            if (!_backgroundLoopHooked) return;
+            CompositionTarget.Rendering -= OnBackgroundRendering;
+            _backgroundLoopHooked = false;
+        }
+
+        private void OnBackgroundRendering(object? sender, EventArgs e)
+        {
+            if (_backgroundEffect == null) return;
+
+            DateTime now = DateTime.UtcNow;
+
+            // Jeden Anzeigetakt melden – auch die, in denen der Effekt gedrosselt nichts zeichnet.
+            // Nur so ist erkennbar, ob die Oberfläche insgesamt noch mitkommt.
+            var quality = _backgroundPolicy.Report(now, IsOnBattery(), WpfRenderTier);
+            if (quality != _backgroundQualityLogged)
+            {
+                LogBackgroundQuality(force: true);
+                ApplyBackgroundShaderCost();       // Stufenwechsel: Rechenarbeit nachziehen
+            }
+
+            // Alle 30 s belegen, was wirklich passiert: der gemessene Anzeigetakt (kommt die
+            // Oberfläche mit?) und die tatsächlich gezeichnete Bildrate (greift die Drosselung
+            // wie beabsichtigt?). Nur so ist die Drosselung nachweisbar und nicht bloß eingestellt.
+            if (_backgroundActivityLoggedAt == DateTime.MinValue)
+            {
+                _backgroundActivityLoggedAt = now;
+                _backgroundDrawnSinceLog = 0;
+            }
+            else if ((now - _backgroundActivityLoggedAt).TotalSeconds >= 30)
+            {
+                double seconds = (now - _backgroundActivityLoggedAt).TotalSeconds;
+                double drawnPerSecond = _backgroundDrawnSinceLog / seconds;
+                double hz = Effects.DisplayRefresh.Hz;
+                string reference = hz > 1 ? " (Monitor " + hz.ToString("0") + " Hz)" : "";
+                string measuredText = _backgroundPolicy.LastMeasuredDisplayFps is double measuredFps
+                    ? measuredFps.ToString("0.0") + " Takte/s"
+                    : "noch keine Messung";
+                App.LogApp("Hintergrund: Anzeige " + measuredText + reference
+                    + " | gezeichnet " + drawnPerSecond.ToString("0.0") + "/s (Ziel "
+                    + ((int)_backgroundPolicy.TargetFps) + " fps)"
+                    + " | " + _backgroundPolicy.Describe(IsOnBattery(), WpfRenderTier)
+                    + " [" + ((int)_backgroundEffectResolution.X) + "x" + ((int)_backgroundEffectResolution.Y) + " Pixel]");
+                _backgroundActivityLoggedAt = now;
+                _backgroundDrawnSinceLog = 0;
+            }
+
+            if (!_backgroundPolicy.Enabled)
+            {
+                // Die aktuelle Hardware kommt nicht mit: Effekt abschalten statt bremsen.
+                GhostFibersBackground.Visibility = System.Windows.Visibility.Collapsed;
+                StopBackgroundAnimation();
+                return;
+            }
+
+            // Drosselung: gezeichnet wird nur im Zielabstand (30 bzw. 15 Bilder/s). WPF rendert
+            // nur, wenn sich ein Uniform wirklich ändert – die Drosselung spart also echte GPU-Zeit.
+            // Der Zeitplan wird aus dem Ziel fortgeschrieben, nicht auf den echten Takt gerundet:
+            // sonst käme bei krummen Verhältnissen zu selten ein Bild heraus (gemessen: 21 statt
+            // 30 Bilder/s bei 64 Takten/s Takt).
+            var targetInterval = _backgroundPolicy.TargetInterval;
+            if (_backgroundNextFrameAt == DateTime.MinValue) _backgroundNextFrameAt = now;
+            if (now < _backgroundNextFrameAt) return;
+
+            if ((now - _backgroundNextFrameAt).TotalSeconds > 1.0)
+            {
+                _backgroundNextFrameAt = now;            // nach langer Pause nichts aufholen
+            }
+            else
+            {
+                do { _backgroundNextFrameAt = _backgroundNextFrameAt.Add(targetInterval); }
+                while (_backgroundNextFrameAt <= now);
+            }
+
+            // Wie im Original: große Zeitsprünge (z.B. nach Standby) begrenzen.
+            double delta = _backgroundLastFrameAt == DateTime.MinValue
+                ? 0
+                : (now - _backgroundLastFrameAt).TotalSeconds;
+            _backgroundLastFrameAt = now;
+            _backgroundElapsedSeconds += Math.Min(delta, 0.1);
+            _backgroundEffect.Time = _backgroundElapsedSeconds;
+            _backgroundDrawnSinceLog++;
+        }
+
+        /// <summary>WPF-Renderstufe: 0 = ohne Hardware-Beschleunigung (dann kein Effekt).</summary>
+        private static int WpfRenderTier => System.Windows.Media.RenderCapability.Tier >> 16;
+
+        /// <summary>
+        /// Läuft der Rechner auf Akku? Auf Desktop-Rechnern gibt es keinen Akku und die
+        /// Abfrage meldet „Online" – dort wird also nie gedrosselt.
+        /// </summary>
+        private static bool IsOnBattery()
+        {
+            try
+            {
+                return System.Windows.Forms.SystemInformation.PowerStatus.PowerLineStatus
+                    == System.Windows.Forms.PowerLineStatus.Offline;
+            }
+            catch
+            {
+                return false;   // im Zweifel wie Netzbetrieb behandeln
+            }
+        }
+
+        /// <summary>Schreibt jede Qualitätsstufe genau einmal ins Log – als Nachweis.</summary>
+        private void LogBackgroundQuality(bool force = false)
+        {
+            if (!force && _backgroundPolicy.Quality == _backgroundQualityLogged) return;
+            _backgroundQualityLogged = _backgroundPolicy.Quality;
+
+            // Neue Stufe → für diese Stufe wird die erreichte Bildrate erneut belegt.
+            _backgroundActivityLoggedAt = DateTime.MinValue;
+            _backgroundDrawnSinceLog = 0;
+
+            // Immer die *wirklich* gerechnete Stufe nennen – eine feste Vorgabe aus den
+            // Einstellungen kann von der Entscheidung der Regel abweichen.
+            string text = "Hintergrund: " + _backgroundPolicy.Describe(IsOnBattery(), WpfRenderTier);
+            if (_backgroundPolicy.Enabled)
+            {
+                text += " | Regel sagt: " + _backgroundPolicy.Quality
+                    + ", gerechnet wird: " + _backgroundPolicy.EffectiveQuality;
+                if (_backgroundResolutionReady)
+                {
+                    text += " auf " + _backgroundEffectResolution.X.ToString("0") + "x"
+                        + _backgroundEffectResolution.Y.ToString("0") + " Pixeln";
+                }
+            }
+            App.LogApp(text);
         }
 
         #endregion
@@ -1325,10 +1674,16 @@ namespace TenzoraX
         {
             if (_notifyIcon == null) return;
 
+            // Echter Akku hat Vorrang; sonst die Schätzung; sonst der letzte bekannte Stand.
+            double percent = CurrentBatteryPercent();
+
             // Batterie-Icon im Tray zeigen, wenn aktiviert UND (Schätzung an ODER ein
-            // echter Akkuwert vorliegt – der echte Wert funktioniert auch ohne Schätzung).
-            if (!_settings.BatteryTrayEnabled || (!_settings.BatteryEnabled && _realBatteryPercent == null))
+            // echter bzw. zuletzt gesehener Akkuwert vorliegt – der echte Wert funktioniert
+            // auch ohne Schätzung).
+            if (!_settings.BatteryTrayEnabled ||
+                (!_settings.BatteryEnabled && _realBatteryPercent == null && _lastSeenBatteryPercent == null))
             {
+                StopTrayChargeAnimation();
                 // Standard-Icon ist gecacht – nur zuweisen, wenn es sich wirklich
                 // geändert hat (sonst bei jedem UI-Update neues GDI-Handle → Leak).
                 var defaultIcon = CreateControllerIcon();
@@ -1339,10 +1694,6 @@ namespace TenzoraX
                 return;
             }
 
-            // Echter Akku hat Vorrang; sonst die berechnete Schätzung.
-            double percent = _realBatteryPercent is int real
-                ? real
-                : GetCalculatedBatteryPercent();
             int intPercent = (int)Math.Round(percent);
 
             // Build tooltip with controller info
@@ -1355,9 +1706,19 @@ namespace TenzoraX
             string tip = $"TenzoraX\n{Lang.Battery_Label}: {batteryLabel}";
             if (_realBatteryPercent is int rp && rp < 20)
                 tip += "\n" + Lang.Battery_Low;
+            if (_chargeDetector.State == Detection.BatteryChargeState.Charging)
+                tip += "\n" + Lang.Battery_Charging;
             if ((DateTime.UtcNow - _lastBatteryInputTime).TotalSeconds < BatteryActiveTimeoutSeconds)
                 tip += $"\n{(Lang.CurrentLang == "de" ? "Controller aktiv" : "Controller active")}";
             _notifyIcon.Text = tip;
+
+            // Ladeanimation im Tray: eigene, gecachte Frames statt der Prozent-PNGs.
+            if (_chargeDetector.State == Detection.BatteryChargeState.Charging && _settings.BatteryAnimationEnabled)
+            {
+                StartTrayChargeAnimation(percent);
+                return;
+            }
+            StopTrayChargeAnimation();
 
             // Only recreate icon when integer percentage changes
             if (intPercent == _batteryLastIconPercent) return;
@@ -1379,6 +1740,106 @@ namespace TenzoraX
         // Gecachtes Standard-Icon: einmal erzeugen und wiederverwenden statt bei
         // jedem UI-Update neu zu allokieren (GDI-Handle-Leak → GDI+-Crash).
         private System.Drawing.Icon? _controllerIcon;
+
+        /// <summary>
+        /// Startet/stoppt den Frame-Zyklus des Lade-Symbols im Tray. Läuft nur, solange
+        /// geladen wird und die Animation eingeschaltet ist – sonst pausiert er und das
+        /// normale Prozent-Symbol steht wieder.
+        /// </summary>
+        private void StartTrayChargeAnimation(double percent)
+        {
+            var tray = _notifyIcon;
+            if (tray == null) return;
+
+            var frames = GetTrayChargeFrames(percent);
+            _batteryLastIconPercent = -1;   // nach dem Laden wieder normal zeichnen
+            _trayChargePhase = (_trayChargePhase + 1) % frames.Length;
+            tray.Icon = frames[_trayChargePhase];
+
+            if (_trayChargeTimer == null)
+            {
+                _trayChargeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+                _trayChargeTimer.Tick += (s, e) =>
+                {
+                    if (_notifyIcon == null) return;
+                    var current = GetTrayChargeFrames(CurrentBatteryPercent());
+                    _trayChargePhase = (_trayChargePhase + 1) % current.Length;
+                    _notifyIcon.Icon = current[_trayChargePhase];
+                };
+            }
+            if (!_trayChargeTimer.IsEnabled) _trayChargeTimer.Start();
+        }
+
+        private void StopTrayChargeAnimation()
+        {
+            if (_trayChargeTimer == null) return;
+            if (_trayChargeTimer.IsEnabled) _trayChargeTimer.Stop();
+        }
+
+        /// <summary>
+        /// Die vier Frames eines Lade-Symbols für einen Prozent-Bereich. Alle Frames
+        /// werden einmal gezeichnet und behalten – ein Icon pro Tick neu zu bauen würde
+        /// GDI-Handles leaken (dieselbe Falle wie bei CreateControllerIcon).
+        /// </summary>
+        private System.Drawing.Icon[] GetTrayChargeFrames(double percent)
+        {
+            int bucket = (int)(Math.Round(Math.Clamp(percent, 0, 100) / 5.0) * 5);
+            if (_trayChargeFrames.TryGetValue(bucket, out var cached)) return cached;
+
+            var frames = new System.Drawing.Icon[4];
+            for (int phase = 0; phase < frames.Length; phase++)
+                frames[phase] = DrawBatteryIcon(bucket, phase);
+            _trayChargeFrames[bucket] = frames;
+            return frames;
+        }
+
+        /// <summary>
+        /// Zeichnet ein Tray-Symbol: Akku-Kontur, Füllstand in der Farbe des Fensters und
+        /// – beim Laden – einen wandernden Lichtstreifen. Ohne neue Bilddateien und ohne
+        /// zusätzliche Abhängigkeit.
+        /// </summary>
+        private System.Drawing.Icon DrawBatteryIcon(int percent, int? phase)
+        {
+            var fillColor = BatteryColorFor(percent);
+            using (var bmp = new System.Drawing.Bitmap(32, 32))
+            using (var g = System.Drawing.Graphics.FromImage(bmp))
+            {
+                g.Clear(System.Drawing.Color.Transparent);
+
+                using (var outline = new System.Drawing.Pen(System.Drawing.Color.FromArgb(225, 225, 235), 2))
+                    g.DrawRectangle(outline, 2, 9, 25, 14);
+                using (var tipBrush = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(225, 225, 235)))
+                    g.FillRectangle(tipBrush, 28, 13, 3, 6);
+
+                int inner = (int)Math.Round(22.0 * Math.Clamp(percent, 0, 100) / 100.0);
+                if (inner > 0)
+                {
+                    using (var fill = new System.Drawing.SolidBrush(
+                        System.Drawing.Color.FromArgb(fillColor.R, fillColor.G, fillColor.B)))
+                        g.FillRectangle(fill, 4, 11, inner, 10);
+                }
+
+                if (phase is int p)
+                {
+                    // Lichtstreifen wandert über den Balken, bleibt aber innen begrenzt.
+                    g.SetClip(new System.Drawing.Rectangle(4, 11, 22, 10));
+                    int x = 4 + (int)Math.Round(28.0 * p / 4.0) - 6;
+                    using (var glow = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(150, 255, 255, 255)))
+                        g.FillRectangle(glow, x, 11, 4, 10);
+                    g.ResetClip();
+                }
+
+                var hIcon = bmp.GetHicon();
+                try
+                {
+                    return (System.Drawing.Icon)System.Drawing.Icon.FromHandle(hIcon).Clone();
+                }
+                finally
+                {
+                    DestroyIcon(hIcon);
+                }
+            }
+        }
 
         private System.Drawing.Icon LoadBatteryIcon(double percent)
         {
@@ -1794,8 +2255,10 @@ namespace TenzoraX
         }
 
         private bool _suppressVigemChanged;
-        private bool _hidhideAutoActive;
-        private string _hidhideAutoInstanceId = "";
+        /// <summary>Alle Schnittstellen, die die Automatik aktuell versteckt hält.</summary>
+        private readonly List<string> _hidhideHidden = new();
+        /// <summary>True, wenn gerade Schnittstellen versteckt sind (Spiegelung).</summary>
+        private bool _hidhideAutoActive => _hidhideHidden.Count > 0;
         private bool _adminPromptShown;
         private string _hidhideStatusOverride = "";
         private System.Windows.Threading.DispatcherTimer? _hidhideRestoreTimer;
@@ -1859,16 +2322,10 @@ namespace TenzoraX
             // Spiele nur die virtuelle Xbox 360 sehen (kein Doppel-Input). Beim
             // Deaktivieren wird das Verstecken wieder aufgehoben. Läuft im Hintergrund,
             // damit die UI beim Ausführen der CLI nicht blockiert.
-            if (on && ok && VigemXboxBridge.IsDriverInstalled())
-            {
-                var active = GetActiveController();
-                if (active != null && !string.IsNullOrEmpty(active.InstanceId) && !IsLikelyVirtualXbox(active))
-                    ApplyHidHideAuto(true, active.InstanceId);
-            }
-            else if (!on && (_hidhideAutoActive || _hidhideAutoInstanceId != ""))
-            {
-                ApplyHidHideAuto(false, _hidhideAutoInstanceId);
-            }
+            // HidHide-Zustand den aktiven Optionen nachziehen: Mit Spiegelung werden alle
+            // Schnittstellen des Pads versteckt (Spiele sehen nur die virtuelle Xbox 360),
+            // ohne sie bleiben nur die HID-Schnittstellen des Duplikat-Schalters übrig.
+            RefreshHidHide();
 
             if (on && !ok)
             {
@@ -2173,6 +2630,8 @@ namespace TenzoraX
             }
             if (installed && _hidhideAutoActive)
             {
+                // Mit Spiegelung sehen Spiele nur die virtuelle Xbox 360, beim
+                // Duplikat-Schalter bleibt XInput sichtbar – das soll der Text unterscheiden.
                 TxtHidhideStatusMain.Text = LanguageManager.Instance.Hidhide_AutoActive;
                 HidhideStatusDotMain.Fill = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129));
                 return;
@@ -2244,54 +2703,103 @@ namespace TenzoraX
         }
 
         /// <summary>
-        /// Führt die HidHide-Automatik (verstecken/aufheben) im Hintergrund aus. Der
-        /// UI-Zustand wird optimistisch sofort gesetzt; die CLI läuft auf einem
-        /// Hintergrund-Thread, damit der Checkbox-Handler nicht blockiert.
+        /// Soll-Zustand der HidHide-Versteckung, abgeleitet aus den aktiven Optionen.
+        /// Liest den Gerätebaum – deshalb immer über RefreshHidHide im Hintergrund aufrufen.
         /// </summary>
-        private async void ApplyHidHideAuto(bool hide, string instanceId)
+        private List<string> ComputeDesiredHidden(string padInstanceId)
         {
+            // Die Spiegelung versteckt nur dann etwas, wenn der virtuelle Controller
+            // wirklich läuft – sonst verschwände das Pad, ohne dass Spiele Ersatz sehen.
+            bool mirror = _settings.UseVigemXbox && ControllerManager.Instance.VigemIsXboxActive;
+            if (!mirror) return new List<string>();
+            if (string.IsNullOrWhiteSpace(padInstanceId)) return new List<string>();
+
+            var group = TenzoraX.Detection.PhysicalDeviceResolver.ResolveForThisMachine(padInstanceId);
+            return group;
+        }
+
+        /// <summary>
+        /// Bringt HidHide auf den Zustand, der aus den aktiven Optionen folgt. Angewendet
+        /// wird nur die Differenz – so kostet ein Umschalten genau einen erhöhten
+        /// CLI-Aufruf (ein UAC-Dialog), und Verstecke, die beide Optionen gemeinsam
+        /// brauchen, bleiben erhalten.
+        ///
+        ///   Spiegelung an → ALLE Schnittstellen des Pads (Spiele sehen nur die virtuelle Xbox 360)
+        ///   beides aus    → alles freigeben, Cloaking aus
+        /// </summary>
+        private async void RefreshHidHide(string instanceId = "")
+        {
+            var active = GetActiveController();
+            string padInstanceId = !string.IsNullOrWhiteSpace(instanceId)
+                ? instanceId.Trim()
+                : (active != null && !string.IsNullOrEmpty(active.InstanceId) && !IsLikelyVirtualXbox(active)
+                    ? active.InstanceId
+                    : "");
+
+            List<string> desired;
+            try
+            {
+                desired = await System.Threading.Tasks.Task.Run(() => ComputeDesiredHidden(padInstanceId));
+            }
+            catch
+            {
+                desired = new List<string>();
+            }
+
+            if (!IsLoaded) return; // Fenster wurde inzwischen geschlossen
+
+            var toHide = desired.Where(id => !_hidhideHidden.Contains(id, StringComparer.OrdinalIgnoreCase)).ToList();
+            var toShow = _hidhideHidden.Where(id => !desired.Contains(id, StringComparer.OrdinalIgnoreCase)).ToList();
+            bool cloakOn = desired.Count > 0;
+
+            // Nichts zu tun und der Zustand passt schon (z.B. Optionen unverändert)?
+            // Dann ohne CLI-Aufruf (und ohne UAC) aussteigen.
+            if (toHide.Count == 0 && toShow.Count == 0 && cloakOn == _hidhideAutoActive)
+            {
+                UpdateHidhideStatusMain();
+                return;
+            }
+
             _hidhideStatusOverride = "";
-            if (hide)
-            {
-                _hidhideAutoActive = true;
-                _hidhideAutoInstanceId = instanceId;
-            }
-            else
-            {
-                _hidhideAutoActive = false;
-                _hidhideAutoInstanceId = "";
-            }
             UpdateHidhideStatusMain();
 
             bool ok;
             try
             {
-                ok = await System.Threading.Tasks.Task.Run(() =>
-                    hide ? HidHideAutomation.HideController(instanceId)
-                         : HidHideAutomation.Unhide(instanceId));
+                ok = await System.Threading.Tasks.Task.Run(
+                    () => HidHideAutomation.ApplyDeviceState(toHide, toShow, cloakOn));
             }
             catch
             {
                 ok = false;
             }
 
-            if (!IsLoaded) return; // Fenster wurde inzwischen geschlossen
+            if (!IsLoaded) return;
 
-            if (!ok && hide)
+            if (!ok)
             {
-                // Verstecken fehlgeschlagen → Zustand zurücksetzen und Grund anzeigen.
-                _hidhideAutoActive = false;
-                _hidhideAutoInstanceId = "";
+                // Zustand ist unbekannt (CLI fehlt, keine Admin-Rechte, UAC abgebrochen) →
+                // nichts als versteckt führen und den Grund anzeigen.
+                _hidhideHidden.Clear();
                 _hidhideStatusOverride = InputSimulator.IsRunningAsAdmin()
                     ? LanguageManager.Instance.Hidhide_AutoFailed
                     : LanguageManager.Instance.Hidhide_AutoNeedsAdmin;
                 UpdateHidhideStatusMain();
-                App.LogApp("HidHide-Automatik fehlgeschlagen (CLI nicht gefunden oder nicht als Administrator ausgeführt).");
+                App.LogApp("HidHide-Zustand konnte nicht gesetzt werden (CLI fehlt, keine Admin-Rechte oder UAC abgebrochen).");
+                return;
             }
-            else if (ok && hide)
-            {
-                CheckHidHideStillSeesController(instanceId);
-            }
+
+            _hidhideHidden.Clear();
+            _hidhideHidden.AddRange(desired);
+            App.LogApp("HidHide-Zustand: " + desired.Count + " versteckt (Spiegelung=" + _settings.UseVigemXbox + ")"
+                       + (desired.Count > 0 ? ": " + string.Join(", ", desired) : ""));
+            UpdateHidhideStatusMain();
+
+            // Sicherheitsnetz: nur wenn jetzt etwas versteckt ist, prüfen wir kurz danach,
+            // ob TenzoraX das Pad (über die Ausnahmeliste) noch lesen kann.
+            if (cloakOn && !string.IsNullOrWhiteSpace(padInstanceId))
+                CheckHidHideStillSeesController(padInstanceId);
+
         }
 
         /// <summary>
@@ -2345,7 +2853,10 @@ namespace TenzoraX
 
         private void StartHidHideRestoreTimer()
         {
-            if (!_settings.UseVigemXbox || !VigemXboxBridge.IsDriverInstalled()) return;
+            // Läuft, sobald die Spiegelung-Option HidHide braucht – der ViGEmBus-Treiber
+            // wird zusätzlich gebraucht.
+            if (!_settings.UseVigemXbox) return;
+            if (!DriverInstaller.IsDriverInstalled("hidhide")) return;
 
             _hidhideRestoreTimer = new System.Windows.Threading.DispatcherTimer
             {
@@ -2353,7 +2864,7 @@ namespace TenzoraX
             };
             _hidhideRestoreTimer.Tick += (s, e) =>
             {
-                if (!_settings.UseVigemXbox || _hidhideAutoActive)
+                if (_hidhideAutoActive)
                 {
                     _hidhideRestoreTimer.Stop();
                     return;
@@ -2364,16 +2875,54 @@ namespace TenzoraX
                 _hidhideRestoreTimer.Stop();
                 if (string.IsNullOrEmpty(active.InstanceId) || IsLikelyVirtualXbox(active)) return;
 
-                // Ist genau dieses Gerät bereits versteckt (hat einen Neustart
-                // überlebt), ist nichts zu tun – kein unnötiger UAC-Prompt.
-                // Der Lese-Check funktioniert ohne Administrator-Rechte. Ein nur
-                // aktives Cloaking ohne dieses Gerät (z.B. Reste früherer Zustände)
-                // reicht NICHT – dann wird sauber neu versteckt.
-                if (HidHideAutomation.IsDeviceHidden(active.InstanceId))
-                    return;
-                ApplyHidHideAuto(true, active.InstanceId);
+                EnsureHidHideAfterRestart(active.InstanceId);
             };
             _hidhideRestoreTimer.Start();
+        }
+
+        /// <summary>
+        /// Start-Wiederherstellung: Ist die KOMPLETTE Schnittstellen-Gruppe des Pads
+        /// bereits versteckt (hat einen Neustart überlebt), ist nichts zu tun – kein
+        /// unnötiger UAC-Prompt. Ein nur aktives Cloaking oder ein halb verstecktes
+        /// Gerät (nur eine von zwei Schnittstellen) reicht NICHT – dann wird sauber
+        /// nachgezogen. Der Lese-Check läuft im Hintergrund und braucht keine
+        /// Administrator-Rechte.
+        /// </summary>
+        private async void EnsureHidHideAfterRestart(string instanceId)
+        {
+            List<string> expected;
+            bool alreadyComplete;
+            try
+            {
+                expected = await System.Threading.Tasks.Task.Run(() => ComputeDesiredHidden(instanceId));
+
+                // "Schon alles versteckt" gilt nur, wenn zusätzlich das Cloaking aktiv
+                // ist: Nach einem harten Beenden bleiben die Einträge in HidHides Liste
+                // stehen, während Cloaking aus ist – dann ist das Pad in Wahrheit
+                // sichtbar und der Zustand muss neu gesetzt werden.
+                alreadyComplete = expected.Count > 0 &&
+                    await System.Threading.Tasks.Task.Run(
+                        () => HidHideAutomation.AreAllDevicesHidden(expected) && HidHideAutomation.IsCloakActive());
+            }
+            catch
+            {
+                expected = new List<string>();
+                alreadyComplete = false;
+            }
+
+            if (!IsLoaded) return;
+
+            if (alreadyComplete)
+            {
+                // Hat den Neustart überlebt → Zustand übernehmen, kein UAC-Dialog nötig.
+                _hidhideHidden.Clear();
+                _hidhideHidden.AddRange(expected);
+                UpdateHidhideStatusMain();
+                App.LogApp("HidHide-Zustand hat den Neustart überlebt: " + expected.Count + " Schnittstelle(n).");
+                return;
+            }
+
+            RefreshHidHide(instanceId);
         }
 
         /// <summary>
@@ -2390,14 +2939,14 @@ namespace TenzoraX
             {
                 bool stillThere = ControllerManager.Instance.ConnectedControllers
                     .Any(c => c.InstanceId == instanceId);
-                if (!stillThere && (_hidhideAutoActive || _hidhideAutoInstanceId == instanceId))
+                if (!stillThere && _hidhideAutoActive)
                 {
-                    _hidhideAutoActive = false;
-                    _hidhideAutoInstanceId = "";
+                    var targets = _hidhideHidden.ToList();
+                    _hidhideHidden.Clear();
                     UpdateHidhideStatusMain();
                     App.LogApp("HidHide-Sicherheitsnetz: Controller nach dem Verstecken nicht mehr lesbar – Verstecken wieder aufgehoben.");
                     // CLI im Hintergrund ausführen, damit die UI nicht blockiert.
-                    _ = System.Threading.Tasks.Task.Run(() => HidHideAutomation.Unhide(instanceId));
+                    _ = System.Threading.Tasks.Task.Run(() => HidHideAutomation.Unhide(targets));
                 }
             }
             catch { }
@@ -2718,6 +3267,12 @@ namespace TenzoraX
             public override System.Drawing.Color SeparatorLight => System.Drawing.Color.FromArgb(30, 30, 40);
         }
 
+        private void StopBackgroundOnClose()
+        {
+            // Im Schließen-Pfad keine Ausnahme riskieren: der Effekt ist nur Kosmetik.
+            try { StopBackgroundAnimation(); } catch { }
+        }
+
         private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
             if (!_isExplicitClose && _settings.MinimizeToTray)
@@ -2730,12 +3285,13 @@ namespace TenzoraX
 
             // 0. HidHide-Automatik: Verstecken beim Beenden wieder aufheben, damit
             //    das physische Gamepad danach überall normal funktioniert.
-            if (_hidhideAutoActive || _hidhideAutoInstanceId != "")
+            if (_hidhideAutoActive)
             {
+                var targets = _hidhideHidden.ToList();
                 if (InputSimulator.IsRunningAsAdmin())
                 {
                     // Als Admin: synchron und schnell, kein UAC nötig.
-                    try { HidHideAutomation.Unhide(_hidhideAutoInstanceId); } catch { }
+                    try { HidHideAutomation.Unhide(targets); } catch { }
                 }
                 else
                 {
@@ -2746,12 +3302,11 @@ namespace TenzoraX
                     // oder beim nächsten Umschalten aufhebbar).
                     try
                     {
-                        _ = System.Threading.Tasks.Task.Run(() => HidHideAutomation.Unhide(_hidhideAutoInstanceId));
+                        _ = System.Threading.Tasks.Task.Run(() => HidHideAutomation.Unhide(targets));
                     }
                     catch { }
                 }
-                _hidhideAutoActive = false;
-                _hidhideAutoInstanceId = "";
+                _hidhideHidden.Clear();
                 _hidhideStatusOverride = "";
             }
 
@@ -2760,6 +3315,15 @@ namespace TenzoraX
 
             // 2. Stop battery timer
             try { _batteryTimer?.Stop(); _batteryTimer = null; } catch { }
+
+            // 2a. Lade-Animation im Tray beenden und die gezeichneten Frames freigeben
+            try { StopTrayChargeAnimation(); _trayChargeTimer = null; } catch { }
+            foreach (var frames in _trayChargeFrames.Values)
+                foreach (var icon in frames)
+                {
+                    try { icon.Dispose(); } catch { }
+                }
+            _trayChargeFrames.Clear();
 
             // 2b. Stop driver status timer
             try { _driversStatusTimer?.Stop(); _driversStatusTimer = null; } catch { }
@@ -2808,6 +3372,8 @@ namespace TenzoraX
             win.ShowDialog();
             // Wiederauswahl-Modus ggf. in den Einstellungen geändert → sofort übernehmen.
             ControllerManager.Instance.ReselectMode = _settings.ControllerReselectMode;
+            // Animierter Hintergrund kann dort ein-/ausgeschaltet worden sein.
+            ApplyBackgroundSetting();
         }
 
         private System.Drawing.Icon CreateControllerIcon()

@@ -16,6 +16,14 @@ namespace TenzoraX
         public string ControllerName { get; set; } = "";
         public string ConnectionType { get; set; } = "Unknown";
         public string BatteryInfo { get; set; } = "N/A";
+
+        /// <summary>
+        /// True, wenn die Quelle eine USB-Verbindung meldet (XInput BATTERY_TYPE_WIRED).
+        /// Achtung (gemessen am 13.09.2026): Das heißt bei diesem Pad **nicht** „am Kabel" –
+        /// der 2,4-GHz-Empfänger ist selbst USB und meldet denselben Typ. Kein Ladezustand.
+        /// </summary>
+        public bool OnCable { get; set; }
+
         public List<string> PressedButtons { get; set; } = new();
         public double LeftStickX { get; set; }
         public double LeftStickY { get; set; }
@@ -1048,6 +1056,7 @@ namespace TenzoraX
         private DateTime _lastRescanAt = DateTime.MinValue;
         private DateTime _lastBatteryReadAt = DateTime.MinValue;
         private string _lastBatteryInfo = "N/A";
+        private bool _lastOnCable;
         private string _lastWinmmSignature = "";
         private int _lastFindingsCount = -1;
 
@@ -1180,6 +1189,12 @@ namespace TenzoraX
         {
             get { lock (_controllers) { } return _vigemBridge.IsActive; }
         }
+
+        /// <summary>
+        /// XInput-Slot des virtuellen Xbox-Controllers (0–3) oder -1.
+        /// Nur Slot 0 bedient auch Spiele, die ausschließlich Slot 0 abfragen.
+        /// </summary>
+        public int VigemUserIndex => _vigemBridge.UserIndex;
 
         // Live-Messwerte für die Diagnose: wann wurde zuletzt eine echte Eingabe vom
         // aktiven (physischen) Controller gelesen und mit wie vielen gedrückten Tasten.
@@ -1773,6 +1788,10 @@ lock (_controllers)
             }
 
             // 4b. XInput-Slots zuordnen: bevorzugt Xbox-HID-Geräte (VID_045E), sonst restliche HID-Geräte
+            var oldByInstance = new Dictionary<string, ControllerInfo>();
+            foreach (var old in oldControllers)
+                if (!string.IsNullOrEmpty(old.InstanceId)) oldByInstance[old.InstanceId] = old;
+
             var xboxHids = hids.Where(h => unclaimed.Contains(h.InstanceId) && h.Vid == 0x045E).ToList();
             var otherHids = hids.Where(h => unclaimed.Contains(h.InstanceId)).ToList();
             int hidPickIdx = 0;
@@ -1791,6 +1810,25 @@ lock (_controllers)
                     unclaimed.Remove(hid.InstanceId);
                 }
                 hidPickIdx++;
+
+                // HID-Kanal auch für XInput-Geräte öffnen: XInput kennt nur vier Stufen und
+                // meldet am Kabel immer FULL (100 %). Der HID-Report desselben Pads liefert
+                // den echten Prozentwert – nur damit stimmt die Anzeige auch beim Laden.
+                HidInputChannel? batteryChannel = null;
+                if (hid != null)
+                {
+                    if (oldByInstance.TryGetValue(hid.InstanceId, out var oldXInput) &&
+                        oldXInput.HidChannel != null && oldXInput.HidChannel.IsRunning)
+                    {
+                        batteryChannel = oldXInput.HidChannel;
+                    }
+                    else
+                    {
+                        batteryChannel = HidInputChannel.TryOpen(hid);
+                        if (batteryChannel != null)
+                            App.LogApp("HID-Akku-Kanal geöffnet: " + hid.Name + " (" + hid.InstanceId + ")");
+                    }
+                }
 
                 string type = hid?.ConnectionType ?? ConnectionTypeUnknown;
                 try
@@ -1812,15 +1850,12 @@ lock (_controllers)
                     RealName = name,
                     ConnectionType = type,
                     VidPid = hid?.VidPid ?? "",
-                    InstanceId = hid?.InstanceId ?? ""
+                    InstanceId = hid?.InstanceId ?? "",
+                    HidChannel = batteryChannel
                 });
             }
 
             // 4c. HID-Geräte ohne XInput/WinMM-Slot: direkt per HID lesen (hid.dll)
-            var oldByInstance = new Dictionary<string, ControllerInfo>();
-            foreach (var old in oldControllers)
-                if (!string.IsNullOrEmpty(old.InstanceId)) oldByInstance[old.InstanceId] = old;
-
             var seenVidPid = new HashSet<string>();
             foreach (var hid in hids)
             {
@@ -2155,8 +2190,7 @@ lock (_controllers)
                 added++;
                 App.LogApp("Merge: Zusatz-Gerät hinzugefügt '" + displayName + "' (" + f.VidPid + ") via " + sourceApi);
             }
-            // Nur bei tatsächlicher Änderung loggen – bei konstanten Duplikaten wäre
-            // das sonst jede Sekunde eine Datei-I/O-Zeile.
+            // Nur bei tatsächlicher Änderung loggen.
             if (added > 0)
                 App.LogApp("MergeAdditionalSources: " + added + " neue Geräte hinzugefügt, " + duplicates + " Duplikate übersprungen");
         }
@@ -2170,6 +2204,10 @@ lock (_controllers)
             var sb = new StringBuilder(8192);
             sb.AppendLine(ControllerDiagnostics.BuildReport(ControllerDiagnostics.Collect()));
 
+            // Live-Sicht der Eingabe-Endpunkte: welches Gerät liest Windows über XInput,
+            // welches über DirectInput – und was zählen Steam und das Windows-Panel daraus.
+            sb.AppendLine(InputEndpoints.Format(InputEndpoints.Collect()));
+
             lock (_controllers)
             {
                 sb.AppendLine("--- Aktive Pipeline-Auswahl ---");
@@ -2177,7 +2215,17 @@ lock (_controllers)
                 sb.AppendLine("Zuletzt verwendet (StableId): " + (string.IsNullOrEmpty(_lastUsedStableId) ? "(keiner)" : _lastUsedStableId));
                 sb.AppendLine("Wiederauswahl-Modus: " + ReselectMode);
                 if (_vigemEnabled)
+                {
                     sb.AppendLine("ViGEm-Xbox-Spiegelung: aktiv – " + _vigemBridge.Status);
+                    int userIndex = _vigemBridge.UserIndex;
+                    if (userIndex >= 0)
+                    {
+                        sb.AppendLine("Virtuelles Pad: XInput-Slot " + userIndex + (userIndex == 0
+                            ? " – auch Spiele, die nur Slot 0 lesen, finden es."
+                            : " – Slot 0 hält das physische Pad; Spiele, die nur Slot 0 lesen,"
+                              + " sehen keinen Controller (Abhilfe: Duplikat-Schalter)."));
+                    }
+                }
 
                 int connectedCount = 0;
                 foreach (var ctrl in _controllers)
@@ -2241,7 +2289,9 @@ lock (_controllers)
                         if (pos == _selectedIndex)
                         {
                             if (c.IsXInput)
-                                sb.AppendLine("Quelle: XInput (XInputGetBatteryInformation, echter Wert)");
+                                sb.AppendLine(c.HidChannel?.BatteryPercent is int hbp
+                                    ? "Aktuell: " + hbp + "% | Quelle: HID-Report (echter Wert)"
+                                    : "Quelle: XInput (XInputGetBatteryInformation – vier Stufen; am Kabel immer FULL)");
                             else if (c.HidChannel?.BatteryPercent is int bp)
                                 sb.AppendLine("Aktuell: " + bp + "% | Quelle: " + (c.HidChannel.BatterySource ?? "HID-Report") + " (echter Wert)");
                             else
@@ -2301,9 +2351,22 @@ lock (_controllers)
             }
             else
             {
-                bool hidden = HidHideAutomation.IsDeviceHidden(physId);
-                sb.AppendLine("Physisches Gamepad versteckt: " + (hidden ? "JA" : "NEIN") + " (" + physName + ")");
-                sb.AppendLine("Für andere Programme: " + ((cloak && hidden)
+                // Ein Pad hängt oft mit mehreren Schnittstellen am Bus (XInput, HID,
+                // zweiter Composite-Zweig). Versteckt werden müssen ALLE – sonst bleibt
+                // der Controller über die übrigen Schnittstellen sichtbar (Doppel-Input).
+                var interfaces = PhysicalDeviceResolver.ResolveForThisMachine(physId);
+                var hiddenEntries = HidHideAutomation.ListHiddenDevices();
+                int hiddenCount = interfaces.Count(id => hiddenEntries.Any(
+                    h => string.Equals(h, id, StringComparison.OrdinalIgnoreCase)));
+                int hidCount = interfaces.Count(id => id.StartsWith("HID\\", StringComparison.OrdinalIgnoreCase));
+                bool allHidden = interfaces.Count > 0 && hiddenCount == interfaces.Count;
+
+                sb.AppendLine("Physisches Gamepad: " + physName);
+                sb.AppendLine("Schnittstellen: " + interfaces.Count + " (davon HID: " + hidCount + ")");
+                sb.AppendLine("Versteckt: " + hiddenCount + "/" + interfaces.Count);
+                if (PhysicalDeviceResolver.LastReadErrors > 0)
+                    sb.AppendLine("Hinweis: " + PhysicalDeviceResolver.LastReadErrors + " Gerät(e) konnten nicht gelesen werden – die Auflösung kann unvollständig sein.");
+                sb.AppendLine("Für andere Programme: " + ((cloak && allHidden)
                     ? "unsichtbar – Spiele sehen nur die virtuelle Xbox 360"
                     : "sichtbar – Doppel-Input möglich"));
             }
@@ -2422,8 +2485,12 @@ lock (_controllers)
             if ((DateTime.UtcNow - _lastBatteryReadAt).TotalSeconds >= 1)
             {
                 _lastBatteryReadAt = DateTime.UtcNow;
-                batteryInfo = ReadBatteryInfo(ctrl.SlotIndex);
+                batteryInfo = ReadBatteryInfo(ctrl.SlotIndex, out bool onCable);
+                // Der HID-Wert desselben Pads ist feiner als XInputs vier Stufen
+                // (am Kabel meldet XInput pauschal FULL = 100 %).
+                batteryInfo = BatteryEstimate.PreferMorePrecise(batteryInfo, ctrl.HidChannel?.BatteryPercent);
                 _lastBatteryInfo = batteryInfo;
+                _lastOnCable = onCable;
             }
 
             try
@@ -2433,6 +2500,7 @@ lock (_controllers)
                     ControllerName = ctrl.Name,
                     ConnectionType = ctrl.ConnectionType,
                     BatteryInfo = batteryInfo,
+                    OnCable = _lastOnCable,
                     PressedButtons = pressed,
                     LeftStickX = lx, LeftStickY = ly,
                     RightStickX = rx, RightStickY = ry
@@ -2444,13 +2512,28 @@ lock (_controllers)
             }
         }
 
-        private static string ReadBatteryInfo(int slotIndex)
+        /// <summary>
+        /// Liest den XInput-Akkustand eines Slots. <paramref name="onCable"/> meldet
+        /// dabei den BATTERY_TYPE_WIRED (USB verbunden). Gemessen am 13.09.2026 liefert
+        /// das Pad diesen Typ am Kabel **und** über den Funkempfänger, jeweils mit
+        /// BATTERY_LEVEL_FULL – der Stufenwert ist hier also keine Messung.
+        /// </summary>
+        private static string ReadBatteryInfo(int slotIndex, out bool onCable)
         {
+            onCable = false;
             try
             {
                 uint brc = XInputGetBatteryInformation((uint)slotIndex, BATTERY_DEVTYPE_GAMEPAD, out var batt);
                 if (brc == ERROR_SUCCESS)
                 {
+                    onCable = batt.BatteryType == BATTERY_TYPE_WIRED;
+
+                    // Am Kabel ist der Stufenwert keine Messung: XInput meldet dort pauschal
+                    // FULL (100 %). Dann lieber „unbekannt“ – der HID-Wert desselben Pads
+                    // (falls vorhanden) oder der zuletzt gemessene Stand übernimmt.
+                    if (!BatteryEstimate.IsXInputLevelMeaningful(batt.BatteryType))
+                        return "N/A";
+
                     // Batteriestand immer anzeigen - egal ob Kabel oder Wireless
                     return batt.BatteryLevel switch
                     {

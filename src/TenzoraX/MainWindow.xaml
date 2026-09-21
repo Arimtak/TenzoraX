@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:TenzoraX"
+        xmlns:effects="clr-namespace:TenzoraX.Effects"
         mc:Ignorable="d"
          Title="TenzoraX" Height="720" Width="1180" MinWidth="900" MinHeight="600"
         Background="{StaticResource BgBrush}" Foreground="{StaticResource TextBrush}"
@@ -135,6 +136,18 @@
         </Style>
     </Window.Resources>
 
+    <!-- Wurzel: animierter Hintergrund (GhostFibers, Pixel-Shader) hinter dem gesamten Inhalt.
+         Der Shader erzeugt die Fläche vollständig selbst; die Hintergrundfarbe ist nur der
+         Rückfall, wenn der Effekt abgeschaltet ist oder der Shader nicht geladen werden kann.
+         Die Spartan-Stufen verringern die Rechenarbeit im Shader (Faserschichten, Grain) – eine
+         Auflösungsreduktion ließ sich in WPF nicht zuverlässig erreichen. -->
+    <Grid x:Name="RootGrid">
+        <Border x:Name="GhostFibersBackground" Background="#12101A" ClipToBounds="True">
+            <Border.Effect>
+                <effects:GhostFibersEffect x:Name="BackgroundEffect"/>
+            </Border.Effect>
+        </Border>
+
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -146,7 +159,7 @@
         </Grid.ColumnDefinitions>
 
         <!-- HEADER BAR -->
-        <Border Grid.Row="0" Grid.ColumnSpan="2" Background="{StaticResource PanelBgBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="14,6" Margin="0,0,0,6">
+        <Border Grid.Row="0" Grid.ColumnSpan="2" Background="{StaticResource GlassPanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="14,6" Margin="0,0,0,6">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -181,7 +194,7 @@
             </Grid.RowDefinitions>
 
             <!-- SECTION 1: Virtual Gamepad -->
-            <Border Grid.Row="0" Background="{StaticResource PanelBgBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
+            <Border Grid.Row="0" Background="{StaticResource GlassPanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -206,9 +219,17 @@
                         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="{Binding Battery_Label}" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11"/>
                             <Border x:Name="BatteryIndicator" Width="24" Height="12" CornerRadius="6" Background="#4A4A4A" Margin="0,0,4,0">
-                                <Border x:Name="BatteryLevel" Width="22" Height="10" CornerRadius="5" Background="#10B981" HorizontalAlignment="Left" Margin="1,1,0,1"/>
+                                <Border x:Name="BatteryLevel" Width="22" Height="10" CornerRadius="5" Background="#10B981" HorizontalAlignment="Left" Margin="1,1,0,1" ClipToBounds="True">
+                                    <!-- Ladeanimation: wandernder Lichtstreifen, nur beim Laden sichtbar -->
+                                    <Border x:Name="ChargeFlow" Width="6" Height="10" HorizontalAlignment="Left" Background="#8CFFFFFF" Visibility="Collapsed">
+                                        <Border.RenderTransform>
+                                            <TranslateTransform x:Name="ChargeFlowShift" X="0"/>
+                                        </Border.RenderTransform>
+                                    </Border>
+                                </Border>
                             </Border>
                             <TextBlock x:Name="TxtBattery" Text="100%" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" VerticalAlignment="Center" FontSize="11"/>
+                            <TextBlock x:Name="TxtChargeState" Text="" Foreground="#38BDF8" FontWeight="SemiBold" VerticalAlignment="Center" FontSize="10" Margin="4,0,0,0" Visibility="Collapsed"/>
                             <TextBlock x:Name="TxtBatteryWarning" Text="{Binding Battery_Low}" Foreground="#F59E0B" FontWeight="Bold" VerticalAlignment="Center" FontSize="10" Margin="6,0,0,0" Visibility="Collapsed"/>
                         </StackPanel>
                     </Grid>
@@ -270,7 +291,7 @@
             <GridSplitter Grid.Row="1" Height="8" HorizontalAlignment="Stretch" Background="Transparent"/>
 
             <!-- SECTION 2: Virtual Keyboard -->
-            <Border Grid.Row="2" Background="{StaticResource PanelBgBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
+            <Border Grid.Row="2" Background="{StaticResource GlassPanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -420,7 +441,7 @@
         </Grid>
 
         <!-- RIGHT PANEL: Profiles -->
-        <Border Grid.Row="1" Grid.Column="1" Background="{StaticResource PanelBgBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
+        <Border Grid.Row="1" Grid.Column="1" Background="{StaticResource GlassPanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -563,6 +584,7 @@
                         </StackPanel>
                     </Border>
 
+
                     <Button x:Name="BtnCheckDrivers" Content="{Binding Drivers_CheckButton}" Click="BtnCheckDrivers_Click" Height="26" Padding="10,1" FontSize="9" Foreground="{StaticResource AccentBrush}" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" Margin="0,0,0,4" HorizontalAlignment="Left"/>
                     <Button x:Name="BtnInstallHidhideMain" Content="{Binding Hidhide_Install}" Click="BtnInstallHidhideMain_Click" Height="26" Padding="10,1" FontSize="9" Foreground="{StaticResource AccentBrush}" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" Margin="0,0,0,4" HorizontalAlignment="Left"/>
                     <Button x:Name="BtnOpenGameControllersMain" Content="{Binding Vigem_OpenControllers}" Click="BtnOpenGameControllersMain_Click" Height="26" Padding="10,1" FontSize="9" Foreground="{StaticResource AccentBrush}" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" Margin="0,0,0,8" HorizontalAlignment="Left"/>
@@ -609,5 +631,6 @@
                 </ScrollViewer>
             </Grid>
         </Border>
+    </Grid>
     </Grid>
 </Window>
