@@ -16,6 +16,10 @@
 
         <SolidColorBrush x:Key="BgBrush" Color="{StaticResource BgColor}"/>
         <SolidColorBrush x:Key="PanelBgBrush" Color="{StaticResource PanelBgColor}"/>
+        <!-- Panel-Fläche des Hauptfensters mit ~85 % Deckkraft: lässt den animierten
+             GhostFibers-Hintergrund durchscheinen, ohne die Lesbarkeit zu opfern.
+             Kleine Bedienelemente bleiben bewusst deckend (PanelBgBrush). -->
+        <SolidColorBrush x:Key="GlassPanelBrush" Color="#D916161E"/>
         <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}"/>
         <SolidColorBrush x:Key="TextBrush" Color="{StaticResource TextColor}"/>
         <SolidColorBrush x:Key="MutedTextBrush" Color="{StaticResource MutedTextColor}"/>

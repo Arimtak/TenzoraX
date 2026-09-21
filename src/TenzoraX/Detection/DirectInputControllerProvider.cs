@@ -220,16 +220,20 @@ namespace TenzoraX.Detection
         }
 
         /// <summary>
-        /// DIDEVCAPS – exakt 40 Bytes wie in dinput8.h definiert.
-        /// Keine zusätzlichen Reservierungsfelder, da dwSize die exakte native
-        /// Strukturgröße angeben muss (sonst meldet GetCapabilities DIERR_INVALIDPARAM
-        /// oder schreibt über den Puffer hinaus).
+        /// DIDEVCAPS – 11 DWORDs = 44 Bytes, exakt wie in dinput8.h definiert.
+        /// dwSize muss die echte native Größe angeben, sonst antwortet GetCapabilities
+        /// mit DIERR_INVALIDPARAM (0x80070057) und die Werte bleiben leer.
+        ///
+        /// Fehler bis 13.09.2026: dwDevType fehlte in dieser Struktur (40 statt 44 Bytes).
+        /// Folge: GetCapabilities schlug für JEDES Gerät fehl, die App kannte Achsen-,
+        /// Tasten- und POV-Anzahl nie (im Bericht stand "Achsen: ? | Tasten: ?").
         /// </summary>
         [StructLayout(LayoutKind.Sequential)]
         internal struct DIDEVCAPS
         {
             public uint dwSize;
             public uint dwFlags;
+            public uint dwDevType;
             public uint dwAxes;
             public uint dwButtons;
             public uint dwPOVs;

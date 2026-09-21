@@ -22,6 +22,26 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel>
 
+                <!-- APPEARANCE (animierter Hintergrund) -->
+                <Border Background="#0D0D12" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="14" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="{Binding Background_Section}" FontWeight="Bold" FontSize="12" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,10"/>
+
+                        <CheckBox x:Name="ChkAnimatedBackground" Content="{Binding Background_EnableTitle}" Checked="ChkAnimatedBackground_Changed" Unchecked="ChkAnimatedBackground_Changed" FontWeight="SemiBold" Foreground="White"/>
+                        <TextBlock Text="{Binding Background_EnableHint}" FontSize="10" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="24,2,0,0"/>
+
+                        <TextBlock Text="{Binding Background_QualityLabel}" FontSize="11" Foreground="White" Margin="24,10,0,4"/>
+                        <ComboBox x:Name="ComboBackgroundQuality" Width="260" HorizontalAlignment="Left" Margin="24,0,0,0" Foreground="Black"
+                                  SelectionChanged="ComboBackgroundQuality_Changed">
+                            <ComboBoxItem Content="{Binding Background_QualityAuto}" Tag="0"/>
+                            <ComboBoxItem Content="{Binding Background_QualityFull}" Tag="3"/>
+                            <ComboBoxItem Content="{Binding Background_QualityReduced}" Tag="2"/>
+                            <ComboBoxItem Content="{Binding Background_QualityMinimal}" Tag="1"/>
+                        </ComboBox>
+                        <TextBlock Text="{Binding Background_QualityHint}" FontSize="10" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="24,4,0,0"/>
+                    </StackPanel>
+                </Border>
+
                 <!-- BATTERY -->
                 <Border Background="#0D0D12" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="14" Margin="0,0,0,10">
                     <StackPanel>
@@ -204,3 +224,4 @@
 
     </Grid>
 </Window>
+

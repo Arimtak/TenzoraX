@@ -44,6 +44,29 @@ namespace TenzoraX.Tests
         }
 
         [Fact]
+        public void UserIndex_MeldetDenSlotDesVirtuellenPads()
+        {
+            using var bridge = new VigemXboxBridge();
+
+            // Ohne Verbindung gibt es keinen Slot.
+            Assert.Equal(-1, bridge.UserIndex);
+
+            if (!bridge.TryConnect()) return;   // nur sinnvoll, wenn Treiber da ist
+
+            // Der Treiber meldet den Slot nicht zwingend im selben Moment – kurz warten.
+            int slot = -1;
+            for (int i = 0; i < 20 && slot < 0; i++)
+            {
+                slot = bridge.UserIndex;
+                if (slot < 0) System.Threading.Thread.Sleep(100);
+            }
+
+            // Nur Slot 0-3 sind gültig; welche Nummer es wird, entscheidet die Maschine
+            // (siehe XInputSlotFallbackTests für die Bewertung).
+            Assert.InRange(slot, 0, 3);
+        }
+
+        [Fact]
         public void Disconnect_AfterSuccessfulConnect_IsClean()
         {
             using var bridge = new VigemXboxBridge();

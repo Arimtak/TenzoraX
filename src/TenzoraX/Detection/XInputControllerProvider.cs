@@ -35,6 +35,36 @@ namespace TenzoraX.Detection
 
         public string ApiName => "XInput";
 
+        /// <summary>
+        /// Belegte XInput-Slots (0-3), frisch abgefragt und ohne die Cooldowns des
+        /// Poll-Loops. Damit erkennt die Spiegelung, ob ein physischer Controller
+        /// Slot 0 hält – dann kann das virtuelle Pad ihn nicht bekommen.
+        /// </summary>
+        public static List<int> GetOccupiedSlots()
+        {
+            var slots = new List<int>();
+            try
+            {
+                for (uint i = 0; i < 4; i++)
+                {
+                    try
+                    {
+                        if (XInputGetState(i, out _) == ERROR_SUCCESS) slots.Add((int)i);
+                    }
+                    catch { }
+                }
+            }
+            catch (DllNotFoundException)
+            {
+                // xinput1_4.dll fehlt – dann gibt es auch keine belegten Slots zu melden
+            }
+            catch (Exception ex)
+            {
+                App.LogApp("XInput-Slot-Abfrage fehlgeschlagen: " + ex.Message);
+            }
+            return slots;
+        }
+
         List<DetectedDeviceInfo> IControllerProvider.Enumerate() => Enumerate();
 
         /// <summary>Prüft alle vier XInput-Slots auf verbundene Controller.</summary>

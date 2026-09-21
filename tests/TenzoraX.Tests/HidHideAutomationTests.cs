@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.IO;
 using TenzoraX;
 using Xunit;
@@ -73,6 +75,33 @@ namespace TenzoraX.Tests
             Assert.Empty(HidHideAutomation.ParseDevList(""));
             Assert.Empty(HidHideAutomation.ParseDevList(null));
             Assert.Empty(HidHideAutomation.ParseDevList("--cloak-on\r\n--app-reg \"x\""));
+        }
+
+        [Fact]
+        public void HideController_NoUsableInstanceIds_ReturnsFalseWithoutSideEffects()
+        {
+            // Mehrfach-Variante: leere Liste, Null und nur-Whitespace-Einträge werden
+            // ohne jeden CLI-Aufruf abgewiesen – es darf nichts versteckt werden.
+            Assert.False(HidHideAutomation.HideController(new List<string>()));
+            Assert.False(HidHideAutomation.HideController((IReadOnlyCollection<string>?)null));
+            Assert.False(HidHideAutomation.HideController(new[] { "", "   " }));
+        }
+
+        [Fact]
+        public void AreAllDevicesHidden_NoUsableIds_ReturnsFalseWithoutCliCall()
+        {
+            Assert.False(HidHideAutomation.AreAllDevicesHidden(new List<string>()));
+            Assert.False(HidHideAutomation.AreAllDevicesHidden(null));
+            Assert.False(HidHideAutomation.AreAllDevicesHidden(new[] { "  " }));
+        }
+
+        [Fact]
+        public void AreAllDevicesHidden_UnknownDevice_ReturnsFalse()
+        {
+            // Reine Leseoperation (--dev-list). Ein nicht verstecktes Gerät darf nie als
+            // "schon erledigt" gelten – sonst würde die Start-Wiederherstellung nichts tun.
+            Assert.False(HidHideAutomation.AreAllDevicesHidden(
+                new[] { "HID\\some-non-existent-device-xyz" }));
         }
 
         [Fact]

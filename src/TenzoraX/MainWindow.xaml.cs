@@ -91,7 +91,7 @@ namespace TenzoraX
         public double WindowTop { get; set; } = double.NaN;
         public bool WindowMaximized { get; set; } = false;
         public string OutputMode { get; set; } = "VK";
-        /// <summary>Ob der aktive Controller zusätzlich als virtueller Xbox-360-Controller (ViGEm) gespiegelt wird.</summary>
+        /// <summary>Ob der aktive Controller zusätzlich als virtueller Xbox-360-Controller (ViGEm) gespiegelt wird. Wird nie persistiert –的标准 immer false beim Start.</summary>
         public bool UseVigemXbox { get; set; } = false;
         public bool SoundEnabled { get; set; } = true;
         public double SoundVolume { get; set; } = 0.5;
@@ -2138,6 +2138,9 @@ namespace TenzoraX
                 SetDefaultRelativePositions();
                 SaveSettings();
             }
+
+            // Xbox-Spiegelung wird nie persistiert – immer deaktiviert beim Start.
+            _settings.UseVigemXbox = false;
 
         }
 

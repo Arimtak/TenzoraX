@@ -46,6 +46,20 @@ public partial class SettingsWindow : Window
         ChkBatteryAnimation.IsChecked = _settings.BatteryAnimationEnabled;
         UpdateBatteryCalculatedLabel();
 
+        ChkAnimatedBackground.IsChecked = _settings.AnimatedBackgroundEnabled;
+
+        // Qualitätsstufe des Hintergrunds (0 = automatisch) passend vorbelegen.
+        ComboBackgroundQuality.SelectedIndex = 0;
+        foreach (ComboBoxItem item in ComboBackgroundQuality.Items)
+        {
+            if (item.Tag is string tag && int.TryParse(tag, out int stage)
+                && stage == _settings.BackgroundQualityOverride)
+            {
+                ComboBackgroundQuality.SelectedItem = item;
+                break;
+            }
+        }
+
         ChkNotification.IsChecked = _settings.HotkeyNotificationsEnabled;
         SliderNotificationDuration.Value = _settings.NotificationDuration;
         UpdateCornerButtons();
@@ -163,6 +177,27 @@ public partial class SettingsWindow : Window
     {
         _settings.BatteryTrayEnabled = ChkBatteryTray.IsChecked == true;
         SaveNow();
+    }
+
+    private void ChkAnimatedBackground_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _settings.AnimatedBackgroundEnabled = ChkAnimatedBackground.IsChecked == true;
+        _save();
+    }
+
+    private void ComboBackgroundQuality_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading) return;
+
+        if (ComboBackgroundQuality.SelectedItem is ComboBoxItem item
+            && item.Tag is string tag && int.TryParse(tag, out int stage))
+        {
+            // 0 = automatisch nach gemessenem Anzeigetakt,
+            // 1 = minimal, 2 = sparsam, 3 = voll (siehe BackgroundQuality).
+            _settings.BackgroundQualityOverride = stage;
+            SaveNow();
+        }
     }
 
     private void ChkBatteryAnimation_Changed(object sender, RoutedEventArgs e)

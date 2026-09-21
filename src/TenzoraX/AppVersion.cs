@@ -2,6 +2,6 @@ namespace TenzoraX
 {
     public static class AppVersion
     {
-        public static string Current => "1.7.2";
+        public static string Current => "1.4.1";
     }
 }

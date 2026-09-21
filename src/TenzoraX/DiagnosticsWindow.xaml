@@ -2,13 +2,15 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="TenzoraX - Controller-Diagnose"
-        Width="760" Height="600"
+        Width="820" Height="760"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{StaticResource BgBrush}"
         Foreground="{StaticResource TextBrush}">
     <Grid Margin="16">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -33,7 +35,23 @@
                  BorderThickness="1" Padding="8"
                  TextWrapping="NoWrap"/>
 
-        <TextBox x:Name="TxtReport" Grid.Row="2"
+        <TextBlock x:Name="TxtEndpointsHeading" Grid.Row="2" Margin="0,0,0,4"
+                   Text="📡 Eingabe-Endpunkte (live)" FontWeight="Bold"
+                   Foreground="{StaticResource TextBrush}"/>
+
+        <TextBox x:Name="TxtEndpoints" Grid.Row="3" Margin="0,0,0,10"
+                 IsReadOnly="True" IsReadOnlyCaretVisible="True"
+                 FontFamily="Consolas" FontSize="12"
+                 Height="250"
+                 Background="{StaticResource PanelBgBrush}"
+                 Foreground="{StaticResource TextBrush}"
+                 BorderBrush="{StaticResource BorderBrush}"
+                 BorderThickness="1" Padding="8"
+                 VerticalScrollBarVisibility="Auto"
+                 HorizontalScrollBarVisibility="Auto"
+                 TextWrapping="NoWrap"/>
+
+        <TextBox x:Name="TxtReport" Grid.Row="4"
                  IsReadOnly="True" IsReadOnlyCaretVisible="True"
                  FontFamily="Consolas" FontSize="12"
                  Background="{StaticResource PanelBgBrush}"
@@ -44,7 +62,7 @@
                  HorizontalScrollBarVisibility="Auto"
                  TextWrapping="NoWrap"/>
 
-        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
             <Button x:Name="BtnRefresh" Content="🔄 Aktualisieren" Height="30" MinWidth="110" Margin="0,0,8,0" Click="BtnRefresh_Click" Background="#2A2A38" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
             <Button x:Name="BtnCopy" Content="📋 Kopieren" Height="30" MinWidth="100" Margin="0,0,8,0" Click="BtnCopy_Click" Background="#2A2A38" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
             <Button x:Name="BtnClose2" Content="✕ Schließen" Height="30" MinWidth="100" Click="BtnClose_Click" Background="#2A2A38" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
