@@ -30,10 +30,13 @@
             </Setter>
         </Style>
 
+        <!-- Tastatur-Taste: gewoelbte Fläche + Lichtkante oben links, Schattenkante
+             unten rechts. Bewusst OHNE DropShadowEffect – bei ~90 Tasten pro Fenster
+             waere das viele zusätzliche Rechenarbeit; die Kante erzeugt die Tiefe. -->
         <Style x:Key="KeyBtnStyle" TargetType="Button">
-            <Setter Property="Background" Value="#1E1E28"/>
+            <Setter Property="Background" Value="{DynamicResource SurfaceRaisedBrush}"/>
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BevelEdgeBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="FontSize" Value="11"/>
             <Setter Property="Margin" Value="2"/>
@@ -46,8 +49,12 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" TargetName="border" Value="#3A3A50"/>
-                                <Setter Property="BorderBrush" TargetName="border" Value="{StaticResource AccentBrush}"/>
+                                <Setter Property="Background" TargetName="border" Value="{DynamicResource SurfaceRaisedHoverBrush}"/>
+                                <Setter Property="BorderBrush" TargetName="border" Value="{DynamicResource BevelHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" TargetName="border" Value="{DynamicResource SurfaceSunkenBrush}"/>
+                                <Setter Property="BorderBrush" TargetName="border" Value="{DynamicResource BevelActiveBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -58,8 +65,8 @@
         <Style x:Key="SpecialKeyStyle" TargetType="Button" BasedOn="{StaticResource KeyBtnStyle}">
             <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
             <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Background" Value="#0F1A24"/>
-            <Setter Property="BorderBrush" Value="#1A3A4A"/>
+            <Setter Property="Background" Value="{DynamicResource SurfaceAccentBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BevelActiveBrush}"/>
         </Style>
 
         <Style x:Key="SectionLabelStyle" TargetType="TextBlock">
@@ -71,7 +78,7 @@
 
         <!-- Keycap Templates for Mapping Parts -->
         <DataTemplate x:Key="KeycapButtonTemplate">
-            <Border Background="#1E1E28" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="1,0">
+            <Border Background="{DynamicResource SurfaceRaisedBrush}" BorderBrush="{DynamicResource BevelActiveBrush}" BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="1,0" Effect="{DynamicResource RaisedShadow}">
                 <TextBlock Text="{Binding Text}" FontSize="12" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
             </Border>
         </DataTemplate>
@@ -99,7 +106,7 @@
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
                             <TabPanel x:Name="HeaderPanel" IsItemsHost="True" Background="Transparent" Margin="0,0,0,6"/>
-                            <Border Grid.Row="1" Background="Transparent" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8">
+                            <Border Grid.Row="1" Background="{DynamicResource SurfaceCardBrush}" BorderBrush="{DynamicResource BevelEdgeBrush}" BorderThickness="1" CornerRadius="6" Padding="8">
                                 <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent"/>
                             </Border>
                         </Grid>
@@ -110,20 +117,23 @@
 
         <Style x:Key="DarkTabItemStyle" TargetType="TabItem">
             <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
-            <Setter Property="Background" Value="#16161E"/>
+            <Setter Property="Background" Value="{DynamicResource SurfaceRaisedBrush}"/>
             <Setter Property="FontSize" Value="10"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Padding" Value="12,5"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TabItem">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Margin="0,0,4,0" Padding="{TemplateBinding Padding}">
+                        <Grid>
+                            <Border CornerRadius="6" Margin="0,0,4,0" Background="{TemplateBinding Background}" Effect="{DynamicResource RaisedShadow}"/>
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6" BorderBrush="{DynamicResource BevelEdgeBrush}" BorderThickness="1" Margin="0,0,4,0" Padding="{TemplateBinding Padding}">
                             <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
                         </Border>
+                        </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter Property="Background" TargetName="Bd" Value="#0E2A35"/>
-                                <Setter Property="BorderBrush" TargetName="Bd" Value="{StaticResource AccentBrush}"/>
+                                <Setter Property="Background" TargetName="Bd" Value="{DynamicResource SurfaceSelectedBrush}"/>
+                                <Setter Property="BorderBrush" TargetName="Bd" Value="{DynamicResource BevelActiveBrush}"/>
                                 <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
@@ -159,7 +169,7 @@
         </Grid.ColumnDefinitions>
 
         <!-- HEADER BAR -->
-        <Border Grid.Row="0" Grid.ColumnSpan="2" Background="{StaticResource GlassPanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="14,6" Margin="0,0,0,6">
+        <ContentControl Grid.Row="0" Grid.ColumnSpan="2" Style="{StaticResource Panel3DStyle}" Padding="14,6" Margin="0,0,0,6">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -183,18 +193,18 @@
                 </Button>
                 <Button x:Name="BtnSettings" Grid.Column="4" Content="⚙" Click="BtnSettings_Click" Width="28" Height="24" Padding="0" FontSize="14" Background="Transparent" BorderThickness="0" Foreground="{StaticResource MutedTextBrush}" Cursor="Hand"/>
             </Grid>
-        </Border>
+        </ContentControl>
 
         <!-- LEFT PANEL: Gamepad & Keyboard -->
         <Grid Grid.Row="1" Grid.Column="0" Margin="0,0,10,0">
             <Grid.RowDefinitions>
-                    <RowDefinition Height="370"/>
-                    <RowDefinition Height="8"/>
+                    <RowDefinition x:Name="GamepadRow" Height="370"/>
+                    <RowDefinition x:Name="SplitterRow" Height="8"/>
                     <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
             <!-- SECTION 1: Virtual Gamepad -->
-            <Border Grid.Row="0" Background="{StaticResource GlassPanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
+            <ContentControl Grid.Row="0" Style="{StaticResource Panel3DStyle}" Padding="12">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -204,6 +214,10 @@
 
                     <!-- Gamepad Header Info -->
                     <Grid Grid.Row="0" Margin="0,0,0,6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
@@ -215,35 +229,42 @@
                             <Button x:Name="BtnControllerHistory" Content="🕘" Width="26" Height="26" Margin="6,0,0,0" Padding="0" FontSize="11" ToolTip="{Binding History_Button}" Click="BtnControllerHistory_Click"/>
                             <Button x:Name="BtnDiagnostics" Content="🔍" Width="26" Height="26" Margin="6,0,0,0" Padding="0" FontSize="11" ToolTip="{Binding Diag_Button}" Click="BtnDiagnostics_Click"/>
                         </StackPanel>
-                        
-                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="{Binding Battery_Label}" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11"/>
-                            <Border x:Name="BatteryIndicator" Width="24" Height="12" CornerRadius="6" Background="#4A4A4A" Margin="0,0,4,0">
-                                <Border x:Name="BatteryLevel" Width="22" Height="10" CornerRadius="5" Background="#10B981" HorizontalAlignment="Left" Margin="1,1,0,1" ClipToBounds="True">
-                                    <!-- Ladeanimation: wandernder Lichtstreifen, nur beim Laden sichtbar -->
-                                    <Border x:Name="ChargeFlow" Width="6" Height="10" HorizontalAlignment="Left" Background="#8CFFFFFF" Visibility="Collapsed">
-                                        <Border.RenderTransform>
-                                            <TranslateTransform x:Name="ChargeFlowShift" X="0"/>
-                                        </Border.RenderTransform>
-                                    </Border>
-                                </Border>
-                            </Border>
-                            <TextBlock x:Name="TxtBattery" Text="100%" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" VerticalAlignment="Center" FontSize="11"/>
-                            <TextBlock x:Name="TxtChargeState" Text="" Foreground="#38BDF8" FontWeight="SemiBold" VerticalAlignment="Center" FontSize="10" Margin="4,0,0,0" Visibility="Collapsed"/>
-                            <TextBlock x:Name="TxtBatteryWarning" Text="{Binding Battery_Low}" Foreground="#F59E0B" FontWeight="Bold" VerticalAlignment="Center" FontSize="10" Margin="6,0,0,0" Visibility="Collapsed"/>
-                        </StackPanel>
+                        <!-- Controller-Feld ein-/ausklappen: ausgeklappt bleibt nur diese
+                             Kopfzeile stehen, die Tastatur bekommt den frei gewordenen Platz. -->
+                        <Button x:Name="BtnToggleGamepad" Grid.Column="2" Content="▾" Width="26" Height="26"
+                                Padding="0" FontSize="11" VerticalAlignment="Center"
+                                ToolTip="{Binding Gamepad_Collapse}" Click="BtnToggleGamepad_Click"/>
+
+                        <!-- Hinweis: Die App listet ein Pad, Windows führt aber weder XInput
+                             noch DirectInput ein Gerät (typisch: Schnittstelle deaktiviert).
+                             Bleibt zusammengeklappt, solange alles zusammenpasst. -->
+                        <Border x:Name="BannerInputMismatch" Grid.Row="1" Grid.ColumnSpan="3"
+                                Visibility="Collapsed" Background="#2A1E08" BorderBrush="#B45309"
+                                BorderThickness="1" CornerRadius="4" Padding="6,4" Margin="0,6,0,0">
+                            <StackPanel>
+                                <TextBlock x:Name="TxtInputMismatch" FontSize="9" Foreground="#FBBF24"
+                                           TextWrapping="Wrap"/>
+                                <!-- Ein Klick löst die einmalige UAC-Abfrage aus und schaltet genau
+                                     diese Schnittstelle wieder ein. -->
+                                <Button x:Name="BtnEnableDisabledInterface" Content="Schnittstelle aktivieren"
+                                        Visibility="Collapsed" Click="BtnEnableDisabledInterface_Click"
+                                        HorizontalAlignment="Left" Margin="0,5,0,0" Padding="8,2"
+                                        FontSize="9" Foreground="#FBBF24" Background="#3A2A0F"
+                                        BorderBrush="#B45309" BorderThickness="1" Cursor="Hand"/>
+                            </StackPanel>
+                        </Border>
                     </Grid>
 
                     <!-- Live-Eingabe-Anzeige: zeigt in Echtzeit, welche Tasten/Achsen
                          gerade vom aktiven Controller gelesen werden (ohne Diagnose). -->
-                    <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,6">
+                    <StackPanel x:Name="GamepadLiveRow" Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,6">
                         <Ellipse x:Name="LiveActivityDot" Width="8" Height="8" Fill="#4A4A4A" VerticalAlignment="Center" Margin="0,0,8,0"/>
                         <TextBlock x:Name="TxtLiveButtons" Foreground="{StaticResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" Text="—"/>
                         <TextBlock x:Name="TxtLiveAxes" Foreground="{StaticResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" Margin="14,0,0,0" Text="—"/>
                     </StackPanel>
 
                     <!-- Gamepad Visual Interface with Background Image -->
-                    <Border Grid.Row="2" Background="Transparent" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                    <Border x:Name="GamepadSurface" Grid.Row="2" Background="{DynamicResource SurfaceSunkenBrush}" CornerRadius="8" BorderBrush="{DynamicResource BevelInsetBrush}" BorderThickness="1">
                         <Canvas x:Name="CanvasGamepad" ClipToBounds="True" Background="Transparent" MouseDown="CanvasGamepad_MouseDown" KeyDown="CanvasGamepad_KeyDown" Focusable="True">
                             <!-- Controller Background Image -->
                             <Image x:Name="ImgController" Source="pack://application:,,,/assets/icons/xbox-360.png" Stretch="Uniform"/>
@@ -286,12 +307,12 @@
                         </Canvas>
                     </Border>
                 </Grid>
-            </Border>
+            </ContentControl>
 
-            <GridSplitter Grid.Row="1" Height="8" HorizontalAlignment="Stretch" Background="Transparent"/>
+            <GridSplitter x:Name="SplitterGamepad" Grid.Row="1" Height="8" HorizontalAlignment="Stretch" Background="Transparent"/>
 
             <!-- SECTION 2: Virtual Keyboard -->
-            <Border Grid.Row="2" Background="{StaticResource GlassPanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
+            <ContentControl Grid.Row="2" Style="{StaticResource Panel3DStyle}" Padding="12">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -300,10 +321,30 @@
 
                     <TextBlock Grid.Row="0" Text="{Binding KB_Heading}" FontWeight="Bold" FontSize="12" Margin="0,0,0,4" Foreground="{StaticResource MutedTextBrush}"/>
 
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                        <StackPanel x:Name="KeyboardPanel" Orientation="Vertical">
-                            <TextBlock Text="{Binding KB_FnKeys}" Style="{StaticResource SectionLabelStyle}"/>
-                            <UniformGrid Columns="13" Rows="1" Height="26" Margin="0,0,0,3">
+                    <!-- Die Tastatur füllt den verfügbaren Platz: jede Tastenreihe ist eine
+                         Sternzeile, damit die Tasten mit dem Fenster wachsen. Ist das
+                         Controller-Feld eingeklappt, bekommt sie den ganzen linken Bereich.
+                         MaxHeight verhindert übergroße Tasten auf sehr hohen Fenstern. -->
+                    <ScrollViewer x:Name="KeyboardScroll" Grid.Row="1"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <!-- Mindesthöhe: 284 DIP ergeben gemessen ~22 DIP Tastenhöhe (Buchstaben)
+                             bzw. ~20 DIP (NumPad) – darunter würden die Beschriftungen beschnitten.
+                             Reicht der Platz nicht (z. B. 900x600 mit sichtbarem Controller-Feld),
+                             hält die Tastatur diese Größe und wird scrollbar, statt zu verschwinden.
+                             Height = ViewportHeight, damit sie bei genügend Platz die Fläche füllt. -->
+                        <Grid x:Name="KeyboardPanel" MinHeight="284"
+                              Height="{Binding ViewportHeight, ElementName=KeyboardScroll}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="1*" MaxHeight="64"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="1*" MaxHeight="64"/>
+                                <RowDefinition Height="4.8*" MaxHeight="289"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Text="{Binding KB_FnKeys}" Style="{StaticResource SectionLabelStyle}" Margin="0,2,0,1"/>
+                            <UniformGrid Grid.Row="1" Columns="13" Rows="1" Margin="0,0,0,3">
                                 <Button Content="ESC" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="10"/>
                                 <Button Content="F1" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="10"/>
                                 <Button Content="F2" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="10"/>
@@ -319,14 +360,14 @@
                                 <Button Content="F12" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="10"/>
                             </UniformGrid>
 
-                            <Border Background="#0A1218" BorderBrush="#1A3A4A" BorderThickness="1" CornerRadius="5" Padding="6,3" Margin="0,1,0,3">
+                            <Border Grid.Row="2" Background="{DynamicResource SurfaceSunkenBrush}" BorderBrush="{DynamicResource BevelInsetBrush}" BorderThickness="1" CornerRadius="5" Padding="6,2" Margin="0,1,0,2">
                                 <Grid>
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                     <TextBlock Grid.Row="0" Text="{Binding KB_GamingShortcuts}" Foreground="{StaticResource AccentBrush}" FontWeight="Bold" FontSize="10" Margin="0,0,0,2"/>
-                                    <UniformGrid Grid.Row="1" Columns="12" Rows="1" Height="26">
+                                    <UniformGrid Grid.Row="1" Columns="12" Rows="1" Height="24">
                                         <Button Content="F13" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
                                         <Button Content="F14" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
                                         <Button Content="F15" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
@@ -343,8 +384,8 @@
                                 </Grid>
                             </Border>
 
-                            <TextBlock Text="{Binding KB_NumberRow}" Style="{StaticResource SectionLabelStyle}"/>
-                            <UniformGrid Columns="11" Rows="1" Height="26" Margin="0,0,0,3">
+                            <TextBlock Grid.Row="3" Text="{Binding KB_NumberRow}" Style="{StaticResource SectionLabelStyle}" Margin="0,2,0,1"/>
+                            <UniformGrid Grid.Row="4" Columns="11" Rows="1" Margin="0,0,0,3">
                                 <Button Content="TAB" Style="{StaticResource KeyBtnStyle}" FontWeight="Bold" Click="KeyboardKey_Click" FontSize="10"/>
                                 <Button Content="1" Style="{StaticResource KeyBtnStyle}" FontWeight="Bold" FontSize="12" Click="KeyboardKey_Click"/>
                                 <Button Content="2" Style="{StaticResource KeyBtnStyle}" FontWeight="Bold" FontSize="12" Click="KeyboardKey_Click"/>
@@ -358,90 +399,121 @@
                                 <Button Content="0" Style="{StaticResource KeyBtnStyle}" FontWeight="Bold" FontSize="12" Click="KeyboardKey_Click"/>
                             </UniformGrid>
 
-                            <TextBlock Text="{Binding KB_Letters}" Style="{StaticResource SectionLabelStyle}"/>
-                            <UniformGrid Columns="10" Rows="1" Height="26" Margin="0,0,0,1">
-                                <Button Content="Q" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="W" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="E" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="R" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="T" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="Y" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="U" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="I" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="O" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="P" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                            </UniformGrid>
+                            <!-- Buchstaben und Ziffernblock nebeneinander: untereinander bräuchte
+                                 der NumPad-Block eine eigene Zeile und die Tastatur müsste dafür
+                                 schrumpfen. -->
+                            <Grid Grid.Row="5">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="10*"/>
+                                    <ColumnDefinition Width="4.6*"/>
+                                </Grid.ColumnDefinitions>
 
-                            <UniformGrid Columns="10" Rows="1" Height="26" Margin="0,0,0,1">
-                                <Button Content="A" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="S" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="D" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="F" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="G" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="H" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="J" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="K" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="L" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="ENTER" Style="{StaticResource KeyBtnStyle}" FontWeight="Bold" Click="KeyboardKey_Click" FontSize="10"/>
-                            </UniformGrid>
+                                <Grid Grid.Column="0" Margin="0,0,6,0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="1*"/>
+                                        <RowDefinition Height="1*"/>
+                                        <RowDefinition Height="1*"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="1*"/>
+                                    </Grid.RowDefinitions>
 
-                            <UniformGrid Columns="10" Rows="1" Height="26" Margin="0,0,0,1">
-                                <Button Content="SHIFT" Style="{StaticResource KeyBtnStyle}" FontWeight="Bold" Click="KeyboardKey_Click" FontSize="10"/>
-                                <Button Content="Z" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="X" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="C" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="V" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="B" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="N" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="M" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
-                                <Button Content="SPACE" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="10"/>
-                                <Button Content="WIN" Style="{StaticResource KeyBtnStyle}" FontWeight="Bold" Click="KeyboardKey_Click" FontSize="10"/>
-                            </UniformGrid>
+                                    <TextBlock Grid.Row="0" Text="{Binding KB_Letters}" Style="{StaticResource SectionLabelStyle}" Margin="0,2,0,1"/>
+                                    <UniformGrid Grid.Row="1" Columns="10" Rows="1" Margin="0,0,0,1">
+                                        <Button Content="Q" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="W" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="E" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="R" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="T" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="Y" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="U" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="I" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="O" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="P" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                    </UniformGrid>
 
-                            <TextBlock Text="{Binding KB_Modifiers}" Style="{StaticResource SectionLabelStyle}"/>
-                            <UniformGrid Columns="6" Rows="1" Height="26" Margin="0,0,0,1">
-                                <Button Content="CTRL" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
-                                <Button Content="ALT" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
-                                <Button Content="SPACE" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="10"/>
-                                <Button Content="{Binding Btn_MouseL}" Tag="MOUSE_LEFT" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="9"/>
-                                <Button Content="{Binding Btn_MouseR}" Tag="MOUSE_RIGHT" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="9"/>
-                                <Button Content="{Binding Btn_MouseM}" Tag="MOUSE_MIDDLE" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="9"/>
-                            </UniformGrid>
+                                    <UniformGrid Grid.Row="2" Columns="10" Rows="1" Margin="0,0,0,1">
+                                        <Button Content="A" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="S" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="D" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="F" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="G" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="H" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="J" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="K" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="L" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="ENTER" Style="{StaticResource KeyBtnStyle}" FontWeight="Bold" Click="KeyboardKey_Click" FontSize="10"/>
+                                    </UniformGrid>
 
-                            <TextBlock Text="{Binding KB_NumPad}" Style="{StaticResource SectionLabelStyle}"/>
-                            <Border Background="#0A1218" BorderBrush="#1A3A4A" BorderThickness="1" CornerRadius="5" Padding="6,3" Margin="0,1,0,2">
-                                <UniformGrid Columns="4" Rows="5">
-                                    <Button Content="NumLock" Tag="NUMLOCK" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="8" Height="20"/>
-                                    <Button Content="Num /" Tag="NUMPAD_DIV" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="Num *" Tag="NUMPAD_MUL" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="Num -" Tag="NUMPAD_MINUS" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="7" Tag="NUMPAD_7" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="8" Tag="NUMPAD_8" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="9" Tag="NUMPAD_9" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="+" Tag="NUMPAD_PLUS" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="4" Tag="NUMPAD_4" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="5" Tag="NUMPAD_5" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="6" Tag="NUMPAD_6" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Border/>
-                                    <Button Content="1" Tag="NUMPAD_1" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="2" Tag="NUMPAD_2" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="3" Tag="NUMPAD_3" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="." Tag="NUMPAD_DOT" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Button Content="0" Tag="NUMPAD_0" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" Height="20" FontSize="9"/>
-                                    <Border/>
-                                    <Border/>
-                                    <Border/>
-                                </UniformGrid>
-                            </Border>
+                                    <UniformGrid Grid.Row="3" Columns="10" Rows="1" Margin="0,0,0,1">
+                                        <Button Content="SHIFT" Style="{StaticResource KeyBtnStyle}" FontWeight="Bold" Click="KeyboardKey_Click" FontSize="10"/>
+                                        <Button Content="Z" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="X" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="C" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="V" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="B" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="N" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="M" Style="{StaticResource KeyBtnStyle}" FontSize="11" Click="KeyboardKey_Click"/>
+                                        <Button Content="SPACE" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="10"/>
+                                        <Button Content="WIN" Style="{StaticResource KeyBtnStyle}" FontWeight="Bold" Click="KeyboardKey_Click" FontSize="10"/>
+                                    </UniformGrid>
 
-                        </StackPanel>
+                                    <TextBlock Grid.Row="4" Text="{Binding KB_Modifiers}" Style="{StaticResource SectionLabelStyle}" Margin="0,2,0,1"/>
+                                    <UniformGrid Grid.Row="5" Columns="6" Rows="1" Margin="0,0,0,1">
+                                        <Button Content="CTRL" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
+                                        <Button Content="ALT" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
+                                        <Button Content="SPACE" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="10"/>
+                                        <Button Content="{Binding Btn_MouseL}" Tag="MOUSE_LEFT" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                        <Button Content="{Binding Btn_MouseR}" Tag="MOUSE_RIGHT" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                        <Button Content="{Binding Btn_MouseM}" Tag="MOUSE_MIDDLE" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                    </UniformGrid>
+                                </Grid>
+
+                                <Grid Grid.Column="1">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="1*"/>
+                                        <RowDefinition Height="1*"/>
+                                        <RowDefinition Height="1*"/>
+                                        <RowDefinition Height="1*"/>
+                                        <RowDefinition Height="1*"/>
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0" Text="{Binding KB_NumPad}" Style="{StaticResource SectionLabelStyle}" Margin="0,2,0,1"/>
+                                    <Border Grid.Row="1" Grid.RowSpan="5" Background="{DynamicResource SurfaceSunkenBrush}" BorderBrush="{DynamicResource BevelInsetBrush}" BorderThickness="1" CornerRadius="5" Padding="4,2" Margin="0,1,0,1">
+                                        <UniformGrid Columns="4" Rows="5">
+                                            <Button Content="NumLock" Tag="NUMLOCK" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="8"/>
+                                            <Button Content="/" Tag="NUMPAD_DIV" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
+                                            <Button Content="*" Tag="NUMPAD_MUL" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
+                                            <Button Content="-" Tag="NUMPAD_MINUS" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="10"/>
+                                            <Button Content="7" Tag="NUMPAD_7" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                            <Button Content="8" Tag="NUMPAD_8" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                            <Button Content="9" Tag="NUMPAD_9" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                            <Button Content="+" Tag="NUMPAD_PLUS" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                            <Button Content="4" Tag="NUMPAD_4" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                            <Button Content="5" Tag="NUMPAD_5" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                            <Button Content="6" Tag="NUMPAD_6" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                            <Border/>
+                                            <Button Content="1" Tag="NUMPAD_1" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                            <Button Content="2" Tag="NUMPAD_2" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                            <Button Content="3" Tag="NUMPAD_3" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                            <Button Content="." Tag="NUMPAD_DOT" Style="{StaticResource SpecialKeyStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                            <Button Content="0" Tag="NUMPAD_0" Style="{StaticResource KeyBtnStyle}" Click="KeyboardKey_Click" FontSize="9"/>
+                                            <Border/>
+                                            <Border/>
+                                            <Border/>
+                                        </UniformGrid>
+                                    </Border>
+                                </Grid>
+                            </Grid>
+                        </Grid>
                     </ScrollViewer>
                 </Grid>
-            </Border>
+            </ContentControl>
         </Grid>
 
         <!-- RIGHT PANEL: Profiles -->
-        <Border Grid.Row="1" Grid.Column="1" Background="{StaticResource GlassPanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
+        <ContentControl Grid.Row="1" Grid.Column="1" Style="{StaticResource Panel3DStyle}" Padding="12">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -465,7 +537,7 @@
                     </Grid>
                 </StackPanel>
 
-                <Border Grid.Row="1" Background="#0D0D12" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="10" Margin="0,0,0,10">
+                <ContentControl Grid.Row="1" Style="{StaticResource Card3DStyle}" Padding="10" Margin="0,0,0,10">
                     <StackPanel>
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
@@ -482,7 +554,7 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <Border Grid.Column="0" Background="#1E1E26" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="5" Padding="6,4">
+                            <Border Grid.Column="0" Background="{DynamicResource SurfaceSunkenBrush}" BorderBrush="{DynamicResource BevelInsetBrush}" BorderThickness="1" CornerRadius="5" Padding="6,4">
                                 <TextBlock x:Name="TxtSelectedCombo" Text="{Binding Mapping_ComboPlaceholder}" FontWeight="SemiBold" TextWrapping="Wrap" FontSize="11"/>
                             </Border>
                             <Button Content="✕" Click="BtnClearCombo_Click" Grid.Column="1" Margin="6,0,0,0" Height="24" Width="24" Padding="0" FontSize="10"/>
@@ -494,14 +566,14 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <Border Grid.Column="0" Background="#1E1E26" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="5" Padding="6,4">
+                            <Border Grid.Column="0" Background="{DynamicResource SurfaceSunkenBrush}" BorderBrush="{DynamicResource BevelInsetBrush}" BorderThickness="1" CornerRadius="5" Padding="6,4">
                                 <TextBlock x:Name="TxtSelectedAction" Text="{Binding Mapping_ActionPlaceholder}" FontWeight="SemiBold" TextWrapping="Wrap" FontSize="11"/>
                             </Border>
                             <Button Content="✕" Click="BtnClearAction_Click" Grid.Column="1" Margin="6,0,0,0" Height="24" Width="24" Padding="0" FontSize="10"/>
                         </Grid>
 
                         <TextBlock Text="{Binding Mapping_NameLabel}" FontSize="10" Foreground="{StaticResource MutedTextBrush}"/>
-                        <Border Background="#1E1E26" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="5" Padding="6,4" Margin="0,4,0,8">
+                        <Border Background="{DynamicResource SurfaceSunkenBrush}" BorderBrush="{DynamicResource BevelInsetBrush}" BorderThickness="1" CornerRadius="5" Padding="6,4" Margin="0,4,0,8">
                             <TextBox x:Name="TxtMappingName" FontSize="11" Background="Transparent" BorderThickness="0" Foreground="White" VerticalContentAlignment="Center" ToolTip="{Binding Mapping_NameHint}"/>
                         </Border>
 
@@ -510,8 +582,8 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <Button Content="{Binding Mapping_Save}" Click="BtnSaveMapping_Click" FontWeight="Bold" Height="30" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" FontSize="11"/>
-                            <Button Grid.Column="1" Content="{Binding Btn_TestOutput}" Click="BtnTestOutput_Click" Height="30" Padding="8,0" Margin="6,0,0,0" FontSize="10" Foreground="#F59E0B" Background="#1E1E28" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
+                            <Button Content="{Binding Mapping_Save}" Click="BtnSaveMapping_Click" FontWeight="Bold" Height="30" Background="{DynamicResource SurfaceAccentBrush}" BorderBrush="{DynamicResource BevelActiveBrush}" FontSize="11"/>
+                            <Button Grid.Column="1" Content="{Binding Btn_TestOutput}" Click="BtnTestOutput_Click" Height="30" Padding="8,0" Margin="6,0,0,0" FontSize="10" Foreground="#F59E0B" Background="{DynamicResource SurfaceRaisedBrush}" BorderBrush="{DynamicResource BevelEdgeBrush}" BorderThickness="1"/>
                         </Grid>
 
                         <Grid Margin="0,6,0,0">
@@ -523,15 +595,15 @@
                             <ComboBox x:Name="ComboOutputMode" Grid.Column="1" SelectionChanged="ComboOutputMode_SelectionChanged" Height="24" FontSize="10"/>
                         </Grid>
                     </StackPanel>
-                </Border>
+                </ContentControl>
 
                 <TabControl x:Name="TabsRightPanel" Grid.Row="2" Style="{StaticResource DarkTabControlStyle}" SelectionChanged="TabsRightPanel_SelectionChanged">
                     <TabItem Header="{Binding Tabs_Combinations}" Style="{StaticResource DarkTabItemStyle}">
-                        <Border Background="#0D0D12" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
+                        <Border Background="{DynamicResource SurfaceCardBrush}" BorderBrush="{DynamicResource BevelEdgeBrush}" BorderThickness="1" CornerRadius="6">
                             <ListBox x:Name="ListMappings" Background="Transparent" BorderThickness="0" Margin="4" SelectionChanged="ListMappings_SelectionChanged">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <Border Background="#1A1A24" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10,7" Margin="0,3">
+                                    <Border Background="{DynamicResource SurfaceListCardBrush}" BorderBrush="{DynamicResource BevelEdgeBrush}" BorderThickness="1" CornerRadius="6" Padding="10,7" Margin="0,3">
                                         <Grid>
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto"/>
@@ -577,7 +649,7 @@
                     <TextBlock Text="{Binding Vigem_Section}" FontSize="11" FontWeight="Bold" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,4" TextWrapping="Wrap"/>
 
                     <CheckBox x:Name="ChkVigemXboxMain" Content="{Binding Vigem_EnableTitle}" Checked="ChkVigemXboxMain_Changed" Unchecked="ChkVigemXboxMain_Changed" FontWeight="SemiBold" Foreground="White" FontSize="10" Margin="0,0,0,4"/>
-                    <Border Background="#101319" CornerRadius="5" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="8,6" Margin="0,0,0,8">
+                    <Border Background="{DynamicResource SurfaceSunkenBrush}" CornerRadius="5" BorderBrush="{DynamicResource BevelInsetBrush}" BorderThickness="1" Padding="8,6" Margin="0,0,0,8">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse x:Name="VigemStatusDotMain" Width="9" Height="9" Fill="#64748B" VerticalAlignment="Center" Margin="0,0,8,0"/>
                             <TextBlock x:Name="TxtVigemStatusMain" Text="" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
@@ -590,7 +662,7 @@
                     <Button x:Name="BtnOpenGameControllersMain" Content="{Binding Vigem_OpenControllers}" Click="BtnOpenGameControllersMain_Click" Height="26" Padding="10,1" FontSize="9" Foreground="{StaticResource AccentBrush}" Background="#0F2C3A" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" Margin="0,0,0,8" HorizontalAlignment="Left"/>
 
                     <TextBlock Text="{Binding Hidhide_Title}" FontSize="11" FontWeight="Bold" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,4" TextWrapping="Wrap"/>
-                    <Border Background="#101319" CornerRadius="5" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="8,6" Margin="0,0,0,6">
+                    <Border Background="{DynamicResource SurfaceSunkenBrush}" CornerRadius="5" BorderBrush="{DynamicResource BevelInsetBrush}" BorderThickness="1" Padding="8,6" Margin="0,0,0,6">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse x:Name="HidhideStatusDotMain" Width="9" Height="9" Fill="#64748B" VerticalAlignment="Center" Margin="0,0,8,0"/>
                             <TextBlock x:Name="TxtHidhideStatusMain" Text="" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
@@ -630,7 +702,7 @@
                 </StackPanel>
                 </ScrollViewer>
             </Grid>
-        </Border>
+        </ContentControl>
     </Grid>
     </Grid>
 </Window>

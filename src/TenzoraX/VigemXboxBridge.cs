@@ -156,6 +156,7 @@ namespace TenzoraX
         private long _applyCount;
         private int _lastPressedCount;
 
+
         /// <summary>Zeitpunkt der letzten Spiegelung (UTC). DateTime.MinValue = noch nie.</summary>
         public DateTime LastApplyAtUtc
         {

@@ -40,11 +40,16 @@ public partial class SettingsWindow : Window
 
     private void LoadSavedValues()
     {
-        ChkBatteryEnable.IsChecked = _settings.BatteryEnabled;
-        TxtBatteryHours.Text = _settings.BatteryHours.ToString("0.#");
-        ChkBatteryTray.IsChecked = _settings.BatteryTrayEnabled;
-        ChkBatteryAnimation.IsChecked = _settings.BatteryAnimationEnabled;
-        UpdateBatteryCalculatedLabel();
+        // Design-Stil vorbelegen (Flach / 3D / Shine).
+        string theme = Theme3D.Normalize(_settings.UiTheme);
+        foreach (ComboBoxItem item in ComboTheme.Items)
+        {
+            if (item.Tag is string tag && tag == theme)
+            {
+                ComboTheme.SelectedItem = item;
+                break;
+            }
+        }
 
         ChkAnimatedBackground.IsChecked = _settings.AnimatedBackgroundEnabled;
 
@@ -117,7 +122,6 @@ public partial class SettingsWindow : Window
     private void RefreshLocalizedTexts()
     {
         UpdateAdminStatus();
-        UpdateBatteryCalculatedLabel();
         TxtSettingsVersion.Text = LanguageManager.Instance.Format("Settings_Version", AppVersion.Current);
     }
 
@@ -137,45 +141,15 @@ public partial class SettingsWindow : Window
         try { _save(); } catch { }
     }
 
-    private void UpdateBatteryCalculatedLabel()
+    /// <summary>Design-Stil umschalten – greift sofort auf alle offenen Fenster.</summary>
+    private void ComboTheme_Changed(object sender, SelectionChangedEventArgs e)
     {
-        double totalMinutes = _settings.BatteryHours * 60;
-        double consumptionPerMinute = totalMinutes > 0 ? 100.0 / totalMinutes : 0;
-        TxtBatteryCalculated.Text = LanguageManager.Instance.Format("Battery_Calculated", (int)totalMinutes, consumptionPerMinute);
-    }
+        if (_loading) return;
+        if (ComboTheme.SelectedItem is not ComboBoxItem item || item.Tag is not string theme)
+            return;
 
-    private void ChkBatteryEnable_Changed(object sender, RoutedEventArgs e)
-    {
-        _settings.BatteryEnabled = ChkBatteryEnable.IsChecked == true;
-        SaveNow();
-    }
-
-    private void TxtBatteryHours_LostFocus(object sender, RoutedEventArgs e)
-    {
-        ApplyBatteryHours();
-    }
-
-    private void TxtBatteryHours_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
-    {
-        if (e.Key == System.Windows.Input.Key.Enter)
-            ApplyBatteryHours();
-    }
-
-    private void ApplyBatteryHours()
-    {
-        if (double.TryParse(TxtBatteryHours.Text, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double val))
-        {
-            val = Math.Max(1, Math.Min(99, val));
-            _settings.BatteryHours = val;
-            TxtBatteryHours.Text = val.ToString("0.#");
-            UpdateBatteryCalculatedLabel();
-            SaveNow();
-        }
-    }
-
-    private void ChkBatteryTray_Changed(object sender, RoutedEventArgs e)
-    {
-        _settings.BatteryTrayEnabled = ChkBatteryTray.IsChecked == true;
+        _settings.UiTheme = theme;
+        Theme3D.Apply(theme);
         SaveNow();
     }
 
@@ -198,26 +172,6 @@ public partial class SettingsWindow : Window
             _settings.BackgroundQualityOverride = stage;
             SaveNow();
         }
-    }
-
-    private void ChkBatteryAnimation_Changed(object sender, RoutedEventArgs e)
-    {
-        _settings.BatteryAnimationEnabled = ChkBatteryAnimation.IsChecked == true;
-        SaveNow();
-    }
-
-    private void BtnResetBattery_Click(object sender, RoutedEventArgs e)
-    {
-        _settings.BatteryActiveMinutes = 0;
-        _settings.BatteryHours = 15;
-        TxtBatteryHours.Text = "15";
-        UpdateBatteryCalculatedLabel();
-        SaveNow();
-    }
-
-    private void BtnConfirmBattery_Click(object sender, RoutedEventArgs e)
-    {
-        ApplyBatteryHours();
     }
 
     private void ChkNotification_Changed(object sender, RoutedEventArgs e)

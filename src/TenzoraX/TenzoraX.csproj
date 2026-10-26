@@ -12,17 +12,14 @@
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <Version>1.4.1</Version>
-    <FileVersion>1.4.1.0</FileVersion>
-    <AssemblyVersion>1.4.1.0</AssemblyVersion>
+    <Version>1.5.0</Version>
+    <FileVersion>1.5.0.0</FileVersion>
+    <AssemblyVersion>1.5.0.0</AssemblyVersion>
   </PropertyGroup>
 
   <ItemGroup>
     <Resource Include="..\..\assets\icons\**">
       <Link>assets\icons\%(RecursiveDir)%(FileName)%(Extension)</Link>
-    </Resource>
-    <Resource Include="..\..\assets\battery\**">
-      <Link>assets\battery\%(RecursiveDir)%(FileName)%(Extension)</Link>
     </Resource>
     <!-- Kompilierter Pixel-Shader des animierten Hintergrunds.
          Quelle: Effects/GhostFibers.fx, neu bauen mit fxc /T ps_3_0 /E main. -->

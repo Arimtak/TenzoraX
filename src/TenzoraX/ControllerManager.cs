@@ -15,14 +15,6 @@ namespace TenzoraX
     {
         public string ControllerName { get; set; } = "";
         public string ConnectionType { get; set; } = "Unknown";
-        public string BatteryInfo { get; set; } = "N/A";
-
-        /// <summary>
-        /// True, wenn die Quelle eine USB-Verbindung meldet (XInput BATTERY_TYPE_WIRED).
-        /// Achtung (gemessen am 13.09.2026): Das heißt bei diesem Pad **nicht** „am Kabel" –
-        /// der 2,4-GHz-Empfänger ist selbst USB und meldet denselben Typ. Kein Ladezustand.
-        /// </summary>
-        public bool OnCable { get; set; }
 
         public List<string> PressedButtons { get; set; } = new();
         public double LeftStickX { get; set; }
@@ -44,8 +36,33 @@ namespace TenzoraX
         public string InstanceId { get; set; } = "";
         public bool AccessError { get; set; }
         public string AccessErrorReason { get; set; } = "";
+
+        /// <summary>
+        /// Die Schnittstelle dieses Geräts ist in Windows deaktiviert (Problemcode 22).
+        /// Sie liefert keine Eingaben und fehlt im Windows-Panel und bei Steam – in der
+        /// Auswahlliste muss sie deshalb als solche erkennbar sein.
+        /// </summary>
+        public bool WindowsInterfaceDisabled { get; set; }
+
         public bool Connected { get; set; }
         public string StableId { get; set; } = "";
+    }
+
+    /// <summary>
+    /// Ein Listeneintrag, der als Dublette derselben Geräteinstanz verworfen wurde.
+    /// Aufbewahrt für den Diagnosebericht – dort ist der Fall nachweisbar, ohne die
+    /// app.log zu durchsuchen.
+    /// </summary>
+    public sealed class CollapsedInstanceRecord
+    {
+        public DateTime At { get; init; }
+        public string Key { get; init; } = "";
+        public string KeptName { get; init; } = "";
+        public string KeptInstanceId { get; init; } = "";
+        public bool KeptHasAccess { get; init; }
+        public string DroppedName { get; init; } = "";
+        public string DroppedInstanceId { get; init; } = "";
+        public bool DroppedHasAccess { get; init; }
     }
 
     public class ControllerManager
@@ -102,28 +119,6 @@ namespace TenzoraX
         private const ushort XINPUT_DPAD_L = 0x0004;
         private const ushort XINPUT_DPAD_R = 0x0008;
 
-        // XInput Battery
-        [DllImport("xinput1_4.dll")]
-        private static extern uint XInputGetBatteryInformation(uint dwUserIndex, byte devType, out XINPUT_BATTERY_INFORMATION pBatteryInformation);
-
-        private const byte BATTERY_DEVTYPE_GAMEPAD = 0x00;
-        private const byte BATTERY_TYPE_WIRED      = 0x01;
-        private const byte BATTERY_TYPE_ALKALINE   = 0x02;
-        private const byte BATTERY_TYPE_NIMH       = 0x03;
-        private const byte BATTERY_TYPE_DISCONNECTED = 0x00;
-        private const byte BATTERY_TYPE_UNKNOWN    = 0xFF;
-        private const byte BATTERY_LEVEL_EMPTY     = 0x00;
-        private const byte BATTERY_LEVEL_LOW       = 0x01;
-        private const byte BATTERY_LEVEL_MEDIUM    = 0x02;
-        private const byte BATTERY_LEVEL_FULL      = 0x03;
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct XINPUT_BATTERY_INFORMATION
-        {
-            public byte BatteryType;
-            public byte BatteryLevel;
-        }
-
 
         // ============================================================
         //  WINMM JOYSTICK API (8BitDo, PS4/5, Switch Pro, etc.)
@@ -139,16 +134,21 @@ namespace TenzoraX
         private static extern int joyGetPosEx(uint uJoyID, out JOYINFOEX pji);
 
         private const int JOYERR_NOERROR = 0;
-        private const int JOYERR_UNPLUGGED = 165;
+        private const int JOYERR_PARMS = 165;       // cbjc passt nicht zu sizeof(JOYCAPS)
+        private const int JOYERR_UNPLUGGED = 167;
         private const uint JOY_RETURNALL = 0x000000FF;
         private const uint JOY_RETURNPOVCTS = 0x00000200;
 
         /// <summary>
-        /// JOYCAPSW exakt nach dem nativen Windows-Layout (winmm.h / mmddk.h):
-        /// WORD wMid; WORD wPid; TCHAR szPname[MAXPNAMELEN];
+        /// JOYCAPSW exakt nach dem nativen Windows-Layout (joystickapi.h / mmddk.h):
+        /// WORD wMid; WORD wPid; WCHAR szPname[MAXPNAMELEN=32];
         /// DWORD wXmin..wZmax; DWORD wNumButtons; DWORD wPeriodMin; DWORD wPeriodMax;
-        /// DWORD wRmin..wVmax; DWORD wCaps; DWORD wMaxAxes; DWORD wNumAxes; DWORD wMaxButtons;
-        /// TCHAR szRegKey[MAXPNAMELEN]; TCHAR szOEMVxD[MAXPNAMELEN];  (MAXPNAMELEN = 32)
+        /// DWORD wRmin..wVmax; WORD wCaps; WORD wMaxAxes; WORD wNumAxes; WORD wMaxButtons;
+        /// WCHAR szRegKey[MAXPNAMELEN=32]; WCHAR szOEMVxD[MAX_JOYSTICKOEMVXDNAME=260];
+        /// Native Größe = 720 Byte. Windows vergleicht cbjc mit sizeof(JOYCAPS) und
+        /// antwortet bei jeder Abweichung mit JOYERR_PARMS – dann gilt JEDER WinMM-Slot
+        /// als unbelegt. Vorher fehlten wNumButtons/wPeriodMin/wPeriodMax, wCaps..
+        /// wMaxButtons waren DWORD statt WORD und szOEMVxD nur 32 statt 260 Zeichen.
         /// </summary>
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct JOYCAPSW
@@ -172,13 +172,13 @@ namespace TenzoraX
             public uint wUmax;
             public uint wVmin;
             public uint wVmax;
-            public uint wCaps;
-            public uint wMaxAxes;
-            public uint wNumAxes;
-            public uint wMaxButtons;
+            public ushort wCaps;
+            public ushort wMaxAxes;
+            public ushort wNumAxes;
+            public ushort wMaxButtons;
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
             public string szRegKey;
-            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
             public string szOEMVxD;
         }
 
@@ -217,7 +217,6 @@ namespace TenzoraX
         private const int HIDP_REPORT_TYPE_INPUT = 1;
         private const int HIDP_REPORT_TYPE_FEATURE = 3;
         private const uint GENERIC_READ = 0x80000000;
-        private const uint GENERIC_WRITE = 0x40000000;
         private const uint FILE_SHARE_READ = 0x00000001;
         private const uint FILE_SHARE_WRITE = 0x00000002;
         private const uint OPEN_EXISTING = 3;
@@ -401,16 +400,26 @@ namespace TenzoraX
             public string InstanceId = "";
             public bool AccessError;
             public string AccessErrorReason = "";
+            public bool WindowsInterfaceDisabled;
             public HidInputChannel? HidChannel;
 
             public bool HasInputChannel => !AccessError;
 
+            /// <summary>
+            /// Stabile Kennung für Auswahl und Verlauf. Bewusst über den kanonischen
+            /// Instanz-Schlüssel: Windows schreibt dieselbe Instanz je nach Quelle in
+            /// anderer Groß-/Kleinschreibung (`…9&8581b18&…` von Raw Input,
+            /// `…9&8581B18&…` von der SetupAPI). Mit dem rohen String wäre dieselbe
+            /// Hardware je nach Rescan-Ergebnis eine „andere“ – die Auswahl springt
+            /// zurück und die Liste baut sich neu auf.
+            /// </summary>
             public string StableId
             {
                 get
                 {
-                    if (!string.IsNullOrEmpty(InstanceId)) return InstanceId;
-                    if (!string.IsNullOrEmpty(VidPid)) return VidPid + (IsXInput ? "_XINPUT" : "_WINMM");
+                    string instanceKey = DeviceHelpers.NormalizeInstanceKey(InstanceId);
+                    if (instanceKey != "") return instanceKey;
+                    if (!string.IsNullOrEmpty(VidPid)) return VidPid.Trim().ToUpperInvariant() + (IsXInput ? "_XINPUT" : "_WINMM");
                     return (IsXInput ? "XINPUT_SLOT_" : "WINMM_SLOT_") + SlotIndex;
                 }
             }
@@ -433,9 +442,25 @@ namespace TenzoraX
             private Thread? _readerThread;
             private volatile bool _running;
 
+            // Verbindungszustand des direkten Lesers: _deviceGone wird gesetzt, wenn
+            // der Handle nach einem Lesefehler nicht neu geöffnet werden kann
+            // (Bluetooth getrennt). Dann wird der Eingabezustand geleert, damit keine
+            // gedrückte Taste und kein gehaltener Stick eingefroren weiterlebt.
+            private volatile bool _deviceGone;
+
+            // Geräte, die KEINE synchronen Reads erlauben (ReadFile scheitert sofort,
+            // Eingaben kommen über RawInput): dort ist ein fehlender Handle kein
+            // Trennsignal, der Kanal bleibt als verbunden geführt.
+            private volatile bool _directReadUnavailable;
+
             // (UsagePage, Usage, LogicalMin, LogicalMax) der relevanten Achsen
             private readonly List<(ushort Page, ushort Usage, int LogMin, int LogMax)> _axes = new();
             private bool _hasRightStick;
+            // Manueller Layout-Fallback (ManualReportParser) nur für Geräte, die
+            // NICHT über XInput gelesen werden. Bei XInput-Pads spiegelt die
+            // 16-Byte-HID-Sammlung (xinputhid) das XInput-Format – der 8BitDo-Parser
+            // deutet das als "R2 gedrückt" und produziert zappelnde Sticks.
+            private bool _manualFallback;
             private DateTime _lastInputLog = DateTime.MinValue;
             private int _lastUsagesRc = int.MinValue;
             private string _lastFallbackKey = "";
@@ -446,19 +471,18 @@ namespace TenzoraX
             private DateTime _lastStateAt = DateTime.MinValue;
             private volatile bool _stateDirty;
 
-            // Batterie: generischer Feature-Report-Leser (funktioniert für beliebige
-            // kabellose HID-Gamepads, siehe Detection.HidBatteryProbe).
-            private readonly HidBatteryProbe _batteryProbe = new();
-            private Thread? _batteryThread;
-            private volatile bool _batteryPolling;
-
-            /// <summary>Erkannter Akkustand in Prozent oder null (noch nicht ermittelt / Gerät ohne Akku-Report).</summary>
-            public int? BatteryPercent => _batteryProbe.BatteryPercent;
-
-            /// <summary>Beschreibung der Akku-Quelle (z.B. „HID-Input-Report Byte[10]“) für die Diagnose.</summary>
-            public string? BatterySource => _batteryProbe.SourceDescription;
-
             public bool IsRunning => _running;
+
+            /// <summary>
+            /// true, solange das Gerät über den direkten Leser erreichbar ist. Der
+            /// Rescan führt den Controller danach als getrennt bzw. wieder verbunden –
+            /// ohne diese Information bliebe ein per Bluetooth getrenntes Pad bis zum
+            /// App-Neustart als „verbunden“ mit eingefrorener Eingabe stehen.
+            /// </summary>
+            public bool IsDeviceConnected => _running && (_directReadUnavailable || !_deviceGone);
+
+            /// <summary>true, wenn dieser Kanal Reports per ManualReportParser auswertet.</summary>
+            public bool AllowsManualFallback => _manualFallback;
 
             /// <summary>Länge des Input-Reports in Bytes (für RawInput-Routing ohne Gerätename).</summary>
             public ushort ReportLength { get; private set; }
@@ -466,7 +490,7 @@ namespace TenzoraX
             /// <summary>Produktname aus dem HID-Descriptor (z.B. "8BitDo Ultimate 2C").</summary>
             public string? ProductName;
 
-            public static HidInputChannel? TryOpen(HidDeviceInfo hid)
+            public static HidInputChannel? TryOpen(HidDeviceInfo hid, bool enableManualFallback = true)
             {
                 try
                 {
@@ -478,10 +502,13 @@ namespace TenzoraX
                     // HID\VID_x&PID_y\Instanz  →  \\?\HID#VID_x&PID_y#Instanz#{4d1e55b2-...}
                     string path = "\\\\?\\" + instance.Replace('\\', '#') + "#" + GUID_DEVINTERFACE_HID.ToString("B");
 
-                    // GENERIC_READ|GENERIC_WRITE: der Handle bleibt für direkte
-                    // ReadFile-Reads geöffnet (Fallback, wenn RawInput für ein Gerät
-                    // keine Reports liefert – z.B. BLE-HID-Gamepads wie der 8BitDo).
-                    var handle = CreateFile(path, GENERIC_READ | GENERIC_WRITE,
+                    // Nur GENERIC_READ: der Handle bleibt für direkte ReadFile-Reads
+                    // geöffnet (Fallback, wenn RawInput für ein Gerät keine Reports
+                    // liefert – z.B. BLE-HID-Gamepads wie der 8BitDo). Ein
+                    // Schreibrecht wird nirgends benutzt; es ist nur zusätzlicher
+                    // Zugriff auf ein Gerät, das auch DirectInput (Windows-Panel,
+                    // joy.cpl) und Spiele öffnen.
+                    var handle = CreateFile(path, GENERIC_READ,
                         FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
                     if (handle.IsInvalid) return null;
 
@@ -500,18 +527,28 @@ namespace TenzoraX
                             return null;
                         }
 
+                        // Die HID-Fassade eines XInput-Pads (Windows erzeugt sie als
+                        // VID_045E&PID_02FF, „XINPUT-kompatibles HID-Gerät") deklariert
+                        // keine Usages und liefert einen 16-Byte-XInput-Rahmen. Der
+                        // 8BitDo-FallbackParser deutet darin Achsenbytes als R2 und
+                        // Hat-Wert und erzeugt so dauerhaft „R2 gedrückt" plus eine
+                        // Richtung (gemessen 26.10.2026, mehrere Rahmenvarianten:
+                        // 00 00 80 FF 7F … und 00 00 80 00 80 …). Solche Geräte werden
+                        // ausschließlich über XInput gelesen, nie über den Fallback.
+                        bool fallbackAllowed = enableManualFallback && !IsXInputHidFacade(hid.Vid, hid.Pid);
+
                         var channel = new HidInputChannel
                         {
                             _preparsed = prep,
                             _readHandle = handle,
                             _devicePath = path,
+                            _manualFallback = fallbackAllowed,
                             ProductName = ReadProductString(handle),
                             ReportLength = caps.InputReportByteLength
                         };
                         channel.LoadValueCaps();
                         channel._running = true;
                         channel.StartDirectReader();
-                        channel.StartBatteryPolling();
                         return channel;
                     }
                     catch
@@ -566,6 +603,15 @@ namespace TenzoraX
                         if (handle == null)
                         {
                             consecutiveReopenFailures++;
+                            // Gerät ist weg: liegengebliebene Eingaben zurücksetzen.
+                            // Ein kurzer Aussetzer (< 1 s) landet hier nie, weil erst
+                            // nach dem Öffnungsversuch entschieden wird.
+                            if (!_deviceGone)
+                            {
+                                _deviceGone = true;
+                                ClearState();
+                                App.LogApp("HID-Leser: Gerät getrennt – Eingabezustand zurückgesetzt.");
+                            }
                             // Log-Spam vermeiden: nur jeden 10. Fehlversuch melden.
                             if (consecutiveReopenFailures % 10 == 1)
                                 App.LogApp("HID-Leser: Gerät nicht erreichbar – versuche weiter...");
@@ -583,6 +629,7 @@ namespace TenzoraX
                         }
                         consecutiveReopenFailures = 0;
                         _readHandle = handle;
+                        _deviceGone = false;
                         App.LogApp("HID-Leser: Gerät wieder verbunden – Lesevorgang fortgesetzt.");
                         continue;
                     }
@@ -607,6 +654,7 @@ namespace TenzoraX
                         // bleibt dabei erhalten – nur der Lese-Thread beendet sich.
                         if (consecutiveReadFailures >= 3)
                         {
+                            _directReadUnavailable = true;
                             App.LogApp("HID-Leser: Direkt-Lesen nicht möglich (err=" +
                                 System.Runtime.InteropServices.Marshal.GetLastWin32Error() +
                                 ") – nutze RawInput, Lese-Thread beendet.");
@@ -622,6 +670,7 @@ namespace TenzoraX
                         continue;
                     }
                     consecutiveReadFailures = 0;
+                    _deviceGone = false;
                     if (bytesRead > 0)
                     {
                         var report = new byte[bytesRead];
@@ -631,117 +680,13 @@ namespace TenzoraX
                 }
             }
 
-            /// <summary>
-            /// Startet den Hintergrund-Poller, der ~alle 30 s die Feature-Reports des
-            /// Geräts abfragt und darin den Akkustand sucht (generisch, ohne hart-
-            /// kodierte Byte-Position – siehe Detection.HidBatteryProbe).
-            /// </summary>
-            private void StartBatteryPolling()
-            {
-                if (_batteryPolling) return;
-                _batteryPolling = true;
-                var thread = new Thread(BatteryPollLoop)
-                {
-                    IsBackground = true,
-                    Name = "TenzoraX-Battery"
-                };
-                _batteryThread = thread;
-                thread.Start();
-            }
-
-            private void BatteryPollLoop()
-            {
-                while (_running && _batteryPolling)
-                {
-                    try { PollFeatureBattery(); }
-                    catch { }
-                    // In kleinen Schritten schlafen, damit Dispose (_running=false) schnell greift.
-                    for (int i = 0; i < 30 && _running && _batteryPolling; i++)
-                        Thread.Sleep(1000);
-                }
-            }
-
-            /// <summary>
-            /// Liest die Feature-Reports des Geräts (über einen separaten Handle, damit
-            /// der blockierte ReadFile-Leser im Eingabe-Kanal nicht gestört wird) und
-            /// füttert den Batterie-Erkenner.
-            /// </summary>
-            private void PollFeatureBattery()
-            {
-                if (string.IsNullOrEmpty(_devicePath)) return;
-                SafeFileHandle? handle = null;
-                try
-                {
-                    handle = CreateFile(_devicePath, GENERIC_READ | GENERIC_WRITE,
-                        FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
-                    if (handle == null || handle.IsInvalid) return;
-
-                    if (!HidD_GetPreparsedData(handle, out IntPtr prep) || prep == IntPtr.Zero) return;
-                    try
-                    {
-                        if (HidP_GetCaps(prep, out var caps) != HIDP_STATUS_SUCCESS) return;
-
-                        // Deklarierte Feature-Report-IDs sammeln (dort meldet das Gerät
-                        // üblicherweise den Akku) + gängige IDs 0x00..0x0F als Fallback.
-                        var ids = new List<byte>();
-                        ushort count = 0;
-                        HidP_GetValueCaps(HIDP_REPORT_TYPE_FEATURE, null, ref count, prep);
-                        if (count > 0)
-                        {
-                            var featureCaps = new HIDP_VALUE_CAPS[count];
-                            if (HidP_GetValueCaps(HIDP_REPORT_TYPE_FEATURE, featureCaps, ref count, prep) == HIDP_STATUS_SUCCESS)
-                            {
-                                for (int i = 0; i < count; i++)
-                                    if (featureCaps[i].ReportID != 0) ids.Add(featureCaps[i].ReportID);
-                            }
-                        }
-                        for (byte id = 0x00; id <= 0x0F; id++)
-                            if (!ids.Contains(id)) ids.Add(id);
-
-                        // Pufferlänge: deklarierte Feature-Länge, sonst gängige Größen
-                        // probieren (manche Geräte deklarieren 0, beantworten aber trotzdem).
-                        int[] lengths = caps.FeatureReportByteLength > 0
-                            ? new[] { (int)caps.FeatureReportByteLength }
-                            : new[] { 16, 64 };
-
-                        int? before = _batteryProbe.BatteryPercent;
-                        foreach (byte id in ids)
-                        {
-                            foreach (int len in lengths)
-                            {
-                                if (len < 2) continue;
-                                var buf = new byte[len];
-                                buf[0] = id;
-                                if (HidD_GetFeature(handle, buf, len))
-                                {
-                                    _batteryProbe.Feed(id, buf);
-                                    break;   // Report erfolgreich gelesen → nächste ID
-                                }
-                            }
-                        }
-                        int? after = _batteryProbe.BatteryPercent;
-                        if (before == null && after != null)
-                            App.LogApp("HID-Batterie erkannt: " + after + "% (" + _batteryProbe.SourceDescription + ")");
-                    }
-                    finally
-                    {
-                        try { HidD_FreePreparsedData(prep); } catch { }
-                    }
-                }
-                catch { }
-                finally
-                {
-                    try { handle?.Dispose(); } catch { }
-                }
-            }
-
             /// <summary>Öffnet den Geräte-Handle erneut (nach BLE-Trennung).</summary>
             private SafeFileHandle? ReopenDeviceHandle()
             {
                 if (string.IsNullOrEmpty(_devicePath)) return null;
                 try
                 {
-                    var h = CreateFile(_devicePath, GENERIC_READ | GENERIC_WRITE,
+                    var h = CreateFile(_devicePath, GENERIC_READ,
                         FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
                     return h.IsInvalid ? null : h;
                 }
@@ -809,6 +754,17 @@ namespace TenzoraX
                 }
             }
 
+            /// <summary>Setzt den Eingabezustand auf neutral (Trennung: nichts bleibt „gedrückt“).</summary>
+            private void ClearState()
+            {
+                lock (_stateLock)
+                {
+                    _pressed = new List<string>();
+                    _lx = _ly = _rx = _ry = 0f;
+                    _stateDirty = true;
+                }
+            }
+
             /// <summary>
             /// Verarbeitet einen per RawInput gelieferten Input-Report. Der Report
             /// enthält die ReportID als erstes Byte, falls das Gerät ReportIDs
@@ -852,11 +808,12 @@ namespace TenzoraX
                     switch (usage)
                     {
                         case 0x30: lx = NormalizeHid(raw, logMin, logMax); break;
-                        case 0x31: ly = NormalizeHid(raw, logMin, logMax); break;
+                        // Y-Achsen: HID meldet "oben" meist als Minimum, im Programm ist oben +1.
+                        case 0x31: ly = -NormalizeHid(raw, logMin, logMax); break;
                         case 0x33: rx = NormalizeHid(raw, logMin, logMax); break;
-                        case 0x34: ry = NormalizeHid(raw, logMin, logMax); break;
+                        case 0x34: ry = -NormalizeHid(raw, logMin, logMax); break;
                         case 0x32: if (!_hasRightStick) rx = NormalizeHid(raw, logMin, logMax); break;
-                        case 0x35: if (!_hasRightStick) ry = NormalizeHid(raw, logMin, logMax); break;
+                        case 0x35: if (!_hasRightStick) ry = -NormalizeHid(raw, logMin, logMax); break;
                         case 0x39: MapHat(raw, pressed); break;
                         case 0xC2: if (NormalizeHid(raw, logMin, logMax) > 0.3f) pressed.Add("L2"); break;
                         case 0xC3: if (NormalizeHid(raw, logMin, logMax) > 0.3f) pressed.Add("R2"); break;
@@ -866,19 +823,8 @@ namespace TenzoraX
                 // Manueller Fallback für Geräte, deren Report keine Standard-HID-Usages
                 // deklariert (z.B. 8BitDo Ultimate Mobile). Das Byte-Layout ist in
                 // Detection.ManualReportParser dokumentiert und unit-getestet.
-                if (!hidFound && report.Length >= 10)
+                if (!hidFound && _manualFallback && report.Length >= 10)
                 {
-                    // Echten Akkustand aus bekannten Layouts füttern (11-Byte-Report:
-                    // Byte [10], siehe Detection.ManualReportParser.ReadBattery). Der
-                    // Erkenner verlangt 3 stabile Samples, damit ein Einzelwert nie
-                    // als Akku durchgeht.
-                    int? batteryBefore = _batteryProbe.BatteryPercent;
-                    byte? battery = ManualReportParser.ReadBattery(report);
-                    if (battery != null)
-                        _batteryProbe.Feed(0xE1, new byte[] { 0, battery.Value }, "HID-Input-Report Byte[10]");
-                    if (batteryBefore == null && _batteryProbe.BatteryPercent != null)
-                        App.LogApp("HID-Batterie erkannt: " + _batteryProbe.BatteryPercent + "% (" + _batteryProbe.SourceDescription + ")");
-
                     var fb = ManualReportParser.Parse(report);
                     pressed.AddRange(fb.Pressed);
                     lx = fb.Lx; ly = fb.Ly; rx = fb.Rx; ry = fb.Ry;
@@ -894,7 +840,7 @@ namespace TenzoraX
                     if (relKey != _lastFallbackKey)
                     {
                         _lastFallbackKey = relKey;
-                        App.LogApp("HID-Fallback: len=" + report.Length + " hex=" + fullHex + " btns=" + string.Join(",", fb.Pressed));
+                        App.LogApp("HID-Fallback [" + (ProductName ?? "?") + "]: len=" + report.Length + " hex=" + fullHex + " btns=" + string.Join(",", fb.Pressed));
                     }
                 }
 
@@ -980,8 +926,20 @@ namespace TenzoraX
             public void Dispose()
             {
                 _running = false;
-                _batteryPolling = false;
-                try { _batteryThread?.Join(1000); } catch { }
+                // Handle schließen beendet einen blockierten ReadFile-Lesevorgang.
+                try { _readHandle?.Dispose(); _readHandle = null; } catch { }
+
+                // Den Lese-Thread abwarten, bevor die Preparsed-Daten freigegeben
+                // werden: ProcessRawReport greift im Thread darauf zu. Ohne Warten
+                // entstand ein Use-after-free beim Austausch eines Kanals (Rescan).
+                var reader = _readerThread;
+                if (reader != null && reader != Thread.CurrentThread)
+                {
+                    try { reader.Join(2500); } catch { }
+                    if (reader.IsAlive) return; // Sicherer, als den Speicher noch benutzt freizugeben.
+                }
+                _readerThread = null;
+
                 try
                 {
                     if (_preparsed != IntPtr.Zero)
@@ -991,8 +949,6 @@ namespace TenzoraX
                     }
                 }
                 catch { }
-                // Handle schließen beendet einen blockierten ReadFile-Lesevorgang.
-                try { _readHandle?.Dispose(); _readHandle = null; } catch { }
             }
         }
 
@@ -1052,13 +1008,47 @@ namespace TenzoraX
         // Poll-Thread nie einen freigegebenen Kanal benutzt.
         private readonly List<HidInputChannel> _retiredChannels = new();
 
+        // Zahl der DirectInput-Gamepads aus dem letzten Rescan (für den Widerspruchs-Hinweis).
+        private int _lastDirectInputCount;
+
+        // Solange das Windows-Panel „Gamecontroller“ offen ist, pausiert die
+        // DirectInput-Aufzählung (siehe MergeAdditionalSources).
+        private bool _directInputPausedByPanel;
+
+        // Selbstreparatur eines DirectInput-Staus (höchstens ein Lauf, höchstens alle 10 min).
+        private static int _diRepairRunning;
+        private static DateTime _diRepairLastUtc = DateTime.MinValue;
+        private static readonly object _diRepairLock = new();
+
+        /// <summary>
+        /// Hinweis für die Oberfläche, wenn die App ein Pad listet, Windows aber weder
+        /// XInput noch DirectInput ein Gerät führt. Leer, solange alles zusammenpasst.
+        /// </summary>
+        public string InputVisibilityWarning { get; private set; } = "";
+
+        /// <summary>
+        /// Instanz-ID der deaktivierten Schnittstelle, auf die sich der Hinweis bezieht –
+        /// damit die Oberfläche sie direkt wieder einschalten kann.
+        /// </summary>
+        public string DisabledInterfaceId { get; private set; } = "";
+
+        /// <summary>
+        /// Zeitpunkt der letzten Änderung an der Controller-Liste (UTC). Das Gamecontroller-Panel
+        /// wird erst geöffnet, wenn diese Änderung lange genug zurückliegt – mitten in einem
+        /// Reconnect bleibt das Windows-Panel sonst unsichtbar hängen (RunDLL-Absturz).
+        /// </summary>
+        public DateTime LastControllerChangeUtc { get; private set; } = DateTime.MinValue;
+
+        // Zuletzt zusammengefasste Doppel-Einträge der Controller-Liste (für den Diagnosebericht).
+        private const int MaxCollapsedInstanceRecords = 10;
+        private readonly List<CollapsedInstanceRecord> _collapsedInstances = new();
+        private readonly object _collapsedInstancesLock = new();
+
         private string _lastRescanSignature = "";
         private DateTime _lastRescanAt = DateTime.MinValue;
-        private DateTime _lastBatteryReadAt = DateTime.MinValue;
-        private string _lastBatteryInfo = "N/A";
-        private bool _lastOnCable;
         private string _lastWinmmSignature = "";
         private int _lastFindingsCount = -1;
+        private bool _loggedXInputHidSkip;
 
         // ViGEm-Xbox-Spiegelung: Überträgt den aktiven Controller auf einen virtuellen
         // Xbox-360-Controller (sofern der ViGEmBus-Treiber installiert ist).
@@ -1109,13 +1099,141 @@ namespace TenzoraX
                             InstanceId = c.InstanceId,
                             AccessError = c.AccessError,
                             AccessErrorReason = c.AccessErrorReason,
+                            WindowsInterfaceDisabled = c.WindowsInterfaceDisabled,
                             Connected = true,
                             StableId = c.StableId
                         });
                     }
                 }
-                return list;
+                return CollapseDuplicateInstances(list, LogCollapsedInstanceDuplicate);
             }
+        }
+
+        /// <summary>
+        /// Bereits protokollierte Zusammenfassungen (kanonischer Schlüssel). Ohne diese
+        /// Bremse schriebe jeder UI-Abgleich eine Zeile: `ConnectedControllers` wird bei
+        /// jedem Rescan (alle 300 ms) und bei jeder Statusabfrage gelesen, und
+        /// `App.LogApp` hängt synchron an die Datei.
+        /// </summary>
+        private static readonly HashSet<string> LoggedInstanceCollapses = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Protokolliert, dass zwei Listeneinträge dieselbe Geräteinstanz waren – einmal pro
+        /// Gerät und Programmlauf, mit beiden Schreibweisen, damit sich solche Fälle in
+        /// freier Wildbahn nachweisen lassen.
+        /// </summary>
+        private void LogCollapsedInstanceDuplicate(DetectedController kept, DetectedController dropped)
+        {
+            string key = DeviceHelpers.NormalizeInstanceKey(kept.InstanceId);
+
+            // Für den Diagnosebericht: gleiche Zusammenfassung nur einmal führen – der
+            // Abgleich läuft alle 300 ms und würde sonst dieselbe Zeile ständig neu anlegen.
+            lock (_collapsedInstancesLock)
+            {
+                bool known = _collapsedInstances.Any(r =>
+                    r.Key == key &&
+                    string.Equals(r.DroppedInstanceId, dropped.InstanceId, StringComparison.Ordinal));
+                if (!known)
+                {
+                    _collapsedInstances.Add(new CollapsedInstanceRecord
+                    {
+                        At = DateTime.Now,
+                        Key = key,
+                        KeptName = kept.Name,
+                        KeptInstanceId = kept.InstanceId,
+                        KeptHasAccess = !kept.AccessError,
+                        DroppedName = dropped.Name,
+                        DroppedInstanceId = dropped.InstanceId,
+                        DroppedHasAccess = !dropped.AccessError
+                    });
+                    if (_collapsedInstances.Count > MaxCollapsedInstanceRecords)
+                        _collapsedInstances.RemoveAt(0);
+                }
+            }
+
+            lock (LoggedInstanceCollapses)
+            {
+                if (!LoggedInstanceCollapses.Add(key)) return;
+            }
+
+            string spelling = string.Equals(kept.InstanceId, dropped.InstanceId, StringComparison.Ordinal)
+                ? "gleiche Schreibweise"
+                : "Schreibweise: '" + kept.InstanceId + "' vs '" + dropped.InstanceId + "'";
+
+            App.LogApp("Liste: doppelte Instanz zusammengefasst – behalten '" + kept.Name + "' (" +
+                       (kept.AccessError ? "ohne Zugriff" : "mit Zugriff") + "), verworfen '" +
+                       dropped.Name + "' (" + (dropped.AccessError ? "ohne Zugriff" : "mit Zugriff") + "); " +
+                       spelling + "; Schlüssel " + key);
+        }
+
+        /// <summary>
+        /// Rendert die zuletzt zusammengefassten Listeneinträge für den Diagnosebericht.
+        /// Rein rechnend (testbar), damit die Ausgabe nicht an der Konsole hängt.
+        /// </summary>
+        internal static string FormatCollapsedInstances(IReadOnlyList<CollapsedInstanceRecord>? records)
+        {
+            if (records == null || records.Count == 0)
+                return "  (keine – die Liste hatte bisher keine Dubletten)" + Environment.NewLine;
+
+            var sb = new StringBuilder();
+            foreach (var r in records)
+            {
+                sb.AppendLine("  [" + r.At.ToString("HH:mm:ss") + "] behalten '" + r.KeptName + "' (" +
+                              (r.KeptHasAccess ? "mit Zugriff" : "ohne Zugriff") + "), verworfen '" +
+                              r.DroppedName + "' (" + (r.DroppedHasAccess ? "mit Zugriff" : "ohne Zugriff") + ")");
+                sb.AppendLine("       Schreibweise: '" + r.KeptInstanceId + "' vs '" + r.DroppedInstanceId + "'");
+                sb.AppendLine("       Schlüssel:    " + r.Key);
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Entfernt Einträge, die dieselbe Geräteinstanz ein zweites Mal führen – die
+        /// Auswahlliste im Hauptfenster zeigt die Liste unverändert an, deshalb muss die
+        /// Dublette hier verschwinden.
+        ///
+        /// Verglichen wird über den kanonischen Instanz-Schlüssel, nicht über den rohen
+        /// String: `HID\VID_x&amp;PID_y\9&amp;8581b18` (Raw Input) und
+        /// `HID\VID_x&amp;PID_y\9&amp;8581B18` (SetupAPI) sind dasselbe Gerät. Einträge
+        /// ohne Instanz-ID (XInput-Slot, WinMM ohne HID-Treffer) bleiben unangetastet –
+        /// dort ist die VID/PID nicht eindeutig genug, um zwei Exemplare zu unterscheiden.
+        /// Bei Gleichstand gewinnt der Eintrag mit Zugriff auf den Eingabekanal.
+        /// </summary>
+        /// <param name="onCollapsed">Meldet jedes zusammengefasste Paar (behalten, verworfen);
+        /// die Produktion hängt dort das Log ein, Tests lassen das Argument weg.</param>
+        internal static List<DetectedController> CollapseDuplicateInstances(
+            IEnumerable<DetectedController> controllers,
+            Action<DetectedController, DetectedController>? onCollapsed = null)
+        {
+            var result = new List<DetectedController>();
+            var indexByKey = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var c in controllers)
+            {
+                if (c == null) continue;
+                string key = DeviceHelpers.NormalizeInstanceKey(c.InstanceId);
+                if (key == "")
+                {
+                    result.Add(c);
+                    continue;
+                }
+                if (indexByKey.TryGetValue(key, out int existing))
+                {
+                    DetectedController prior = result[existing];
+                    if (prior.AccessError && !c.AccessError)
+                    {
+                        result[existing] = c;
+                        onCollapsed?.Invoke(c, prior);
+                    }
+                    else
+                    {
+                        onCollapsed?.Invoke(prior, c);
+                    }
+                    continue;
+                }
+                indexByKey[key] = result.Count;
+                result.Add(c);
+            }
+            return result;
         }
 
         public int ActiveGamepadIndex
@@ -1252,6 +1370,7 @@ namespace TenzoraX
             };
             _pollThread.Start();
             StateChanged += OnControllerState;
+            GameControllersPanel.StartWatchdog();
             App.LogApp("Controller-System gestartet");
         }
 
@@ -1606,6 +1725,18 @@ namespace TenzoraX
                     }
                     else
                     {
+                        // Billige Wiederverbindung: Ist kein Controller ausgewählt, kann ein
+                        // zuvor getrennter XInput-Slot nur durch den Rescan zurückkommen –
+                        // und der dauert auf Systemen mit hängender DirectInput-Aufzählung
+                        // bis zu einer Minute (gemessen 26.10.2026: 41 s für einen Zyklus).
+                        // In dieser Zeit zeigt die App „nicht erkannt“, obwohl XInput das Pad
+                        // längst wieder führt. XInputGetState kostet nur Mikrosekunden.
+                        if (scanTimer % 125 == 0)     // ~2x pro Sekunde bei 4-ms-Poll
+                        {
+                            TryAdoptXInputSlot();     // Liste ist leer, XInput hat aber ein Pad
+                            TryReconnectXInput();     // Eintrag vorhanden, aber getrennt
+                        }
+
                         // No controller selected - fire empty state.
                         // Alle 20 Iterationen (~80 ms bei 4-ms-Poll): entspricht der
                         // alten ~13-Event/s-Taktung vor der Poll-Raten-Erhöhung, damit
@@ -1618,7 +1749,6 @@ namespace TenzoraX
                                 {
                                     ControllerName = "None",
                                     ConnectionType = "N/A",
-                                    BatteryInfo = "N/A",
                                     PressedButtons = new List<string>()
                                 });
                             }
@@ -1748,8 +1878,10 @@ lock (_controllers)
             // 3. HID-Gamecontroller über SetupAPI ermitteln (Name, VID/PID, InstanceId, Verbindungsart)
             //    Detection.HidControllerProvider akzeptiert Usage 5 (Gamepad) UND Usage 4 (Joystick),
             //    damit auch Bluetooth-Varianten erkannt werden, die sich als Joystick melden.
+            //    Instanz-IDs werden case-insensitiv geführt: derselbe Pfad kommt je nach Quelle
+            //    in anderer Schreibweise zurück – sonst würde ein Gerät zweimal vergeben.
             List<HidDeviceInfo> hids = HidControllerProvider.Instance.EnumerateGamepads(includeJoystickUsage: true, verboseLogging: false);
-            var unclaimed = new HashSet<string>(hids.Select(h => h.InstanceId));
+            var unclaimed = new HashSet<string>(hids.Select(h => h.InstanceId), StringComparer.OrdinalIgnoreCase);
 
             var newControllers = new List<ControllerInfo>();
 
@@ -1788,9 +1920,14 @@ lock (_controllers)
             }
 
             // 4b. XInput-Slots zuordnen: bevorzugt Xbox-HID-Geräte (VID_045E), sonst restliche HID-Geräte
-            var oldByInstance = new Dictionary<string, ControllerInfo>();
+            //    Schlüssel = kanonischer Instanz-Schlüssel, damit ein Wechsel der
+            //    Schreibweise den vorhandenen Kanal nicht neu öffnen lässt.
+            var oldByInstance = new Dictionary<string, ControllerInfo>(StringComparer.Ordinal);
             foreach (var old in oldControllers)
-                if (!string.IsNullOrEmpty(old.InstanceId)) oldByInstance[old.InstanceId] = old;
+            {
+                string oldKey = DeviceHelpers.NormalizeInstanceKey(old.InstanceId);
+                if (oldKey != "") oldByInstance[oldKey] = old;
+            }
 
             var xboxHids = hids.Where(h => unclaimed.Contains(h.InstanceId) && h.Vid == 0x045E).ToList();
             var otherHids = hids.Where(h => unclaimed.Contains(h.InstanceId)).ToList();
@@ -1811,33 +1948,30 @@ lock (_controllers)
                 }
                 hidPickIdx++;
 
-                // HID-Kanal auch für XInput-Geräte öffnen: XInput kennt nur vier Stufen und
-                // meldet am Kabel immer FULL (100 %). Der HID-Report desselben Pads liefert
-                // den echten Prozentwert – nur damit stimmt die Anzeige auch beim Laden.
-                HidInputChannel? batteryChannel = null;
+                // HID-Kanal auch für XInput-Geräte öffnen (RawInput-Routing: Report-Länge
+                // und Zustands-Snapshot desselben Pads).
+                HidInputChannel? hidChannel = null;
                 if (hid != null)
                 {
-                    if (oldByInstance.TryGetValue(hid.InstanceId, out var oldXInput) &&
-                        oldXInput.HidChannel != null && oldXInput.HidChannel.IsRunning)
+                    oldByInstance.TryGetValue(DeviceHelpers.NormalizeInstanceKey(hid.InstanceId), out var oldXInput);
+                    // Für XInput-Pads ohne Layout-Fallback öffnen: ihre HID-Sammlung
+                    // (xinputhid) hat keine Standard-Usages, und der 16-Byte-Fallback
+                    // würde daraus dauerhaft "R2 gedrückt" und zappelnde Sticks machen.
+                    if (oldXInput?.HidChannel != null && oldXInput.HidChannel.IsRunning &&
+                        !oldXInput.HidChannel.AllowsManualFallback)
                     {
-                        batteryChannel = oldXInput.HidChannel;
+                        hidChannel = oldXInput.HidChannel;
                     }
                     else
                     {
-                        batteryChannel = HidInputChannel.TryOpen(hid);
-                        if (batteryChannel != null)
-                            App.LogApp("HID-Akku-Kanal geöffnet: " + hid.Name + " (" + hid.InstanceId + ")");
+                        if (oldXInput?.HidChannel != null) oldXInput.HidChannel.Dispose();
+                        hidChannel = HidInputChannel.TryOpen(hid, enableManualFallback: false);
+                        if (hidChannel != null)
+                            App.LogApp("HID-Kanal geöffnet: " + hid.Name + " (" + hid.InstanceId + ")");
                     }
                 }
 
                 string type = hid?.ConnectionType ?? ConnectionTypeUnknown;
-                try
-                {
-                    uint brc = XInputGetBatteryInformation((uint)slot, BATTERY_DEVTYPE_GAMEPAD, out var batt);
-                    if (brc == ERROR_SUCCESS && batt.BatteryType == BATTERY_TYPE_WIRED)
-                        type = ConnectionTypeUsb;   // Kabel ist definitiv USB
-                }
-                catch { }
 
                 string name = hid?.Name ?? $"Controller {newControllers.Count + 1} (Xbox)";
 
@@ -1851,12 +1985,12 @@ lock (_controllers)
                     ConnectionType = type,
                     VidPid = hid?.VidPid ?? "",
                     InstanceId = hid?.InstanceId ?? "",
-                    HidChannel = batteryChannel
+                    HidChannel = hidChannel
                 });
             }
 
             // 4c. HID-Geräte ohne XInput/WinMM-Slot: direkt per HID lesen (hid.dll)
-            var seenVidPid = new HashSet<string>();
+            var seenVidPid = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var hid in hids)
             {
                 if (!unclaimed.Contains(hid.InstanceId)) continue;
@@ -1864,7 +1998,7 @@ lock (_controllers)
 
                 // Bestehenden Kanal wiederverwenden (kein Re-Open bei jedem Rescan), sonst neu öffnen
                 HidInputChannel? channel = null;
-                if (oldByInstance.TryGetValue(hid.InstanceId, out var oldCtrl) && oldCtrl.HidChannel != null && oldCtrl.HidChannel.IsRunning)
+                if (oldByInstance.TryGetValue(DeviceHelpers.NormalizeInstanceKey(hid.InstanceId), out var oldCtrl) && oldCtrl.HidChannel != null && oldCtrl.HidChannel.IsRunning)
                 {
                     channel = oldCtrl.HidChannel;
                 }
@@ -1885,7 +2019,9 @@ lock (_controllers)
                     SlotIndex = -1,
                     IsXInput = false,
                     Name = displayName,
-                    Connected = true,
+                    // Getrenntes Gerät (Bluetooth weg) wird nicht mehr als verbunden
+                    // geführt; ohne Kanal bleibt der bisherige Zustand (Zugriffsfehler).
+                    Connected = channel == null || channel.IsDeviceConnected,
                     RealName = displayName,
                     ConnectionType = hid.ConnectionType,
                     VidPid = hid.VidPid,
@@ -1922,9 +2058,26 @@ lock (_controllers)
                     App.LogApp("Dedupe: " + (before - newControllers.Count) + " redundante WinMM-Slots entfernt (XInput hat Vorrang)");
             }
 
+            // 4c-ter. In Windows deaktivierte Schnittstellen kennzeichnen: die SetupAPI
+            //    meldet sie als vorhanden, Eingaben liefern sie aber keine – ohne Markierung
+            //    sieht ein solches Gerät in der Liste aus wie ein normaler Controller,
+            //    obwohl weder Windows-Panel noch Spiele es lesen (am 26.10.2026 gemessen:
+            //    Pad stand in TenzoraX, fehlte aber im Windows-Panel „Game Controller“).
+            MarkDisabledInterfaces(newControllers);
+
+            // 4c-ter-2. Widerspruch melden: Die App listet ein Pad, Windows führt aber weder
+            //    XInput noch DirectInput ein Gerät – genau der Fall einer deaktivierten
+            //    Schnittstelle. Ohne Hinweis wirkt die leere Liste im Windows-Panel wie ein
+            //    Fehler der App. Nach der Kennzeichnung, damit der Hinweis die Schnittstelle
+            //    beim Namen nennen kann.
+            UpdateInputVisibilityWarning(newControllers, xinputSlots.Count);
+
             // 4d. Eingabekanäle getrennter Geräte aufbewahren – freigegeben werden sie
             // erst im NÄCHSTEN Zyklus (der Poll-Thread könnte sie sonst noch verwenden).
-            var newInstances = new HashSet<string>(newControllers.Select(c => c.InstanceId));
+            //    Case-insensitiv verglichen: wechselt nur die Schreibweise (Raw Input klein,
+            //    SetupAPI groß), darf der Kanal nicht als „Gerät getrennt“ aussortiert und
+            //    beim nächsten Zyklus ein zweiter Leser auf dasselbe Gerät geöffnet werden.
+            var newInstances = new HashSet<string>(newControllers.Select(c => c.InstanceId), StringComparer.OrdinalIgnoreCase);
             lock (_controllers)
             {
                 foreach (var old in oldControllers)
@@ -2023,16 +2176,156 @@ lock (_controllers)
             }
 
             // 8. Benachrichtigung nur bei tatsächlicher Änderung (Geräte, Typ, Fehlerzustand)
-            string signature = string.Join("|", newControllers.Select(c => c.StableId + ":" + c.ConnectionType + ":" + (c.AccessError ? "ERR" : "OK") + ":" + (c.Connected ? "C" : "D")));
+            string signature = string.Join("|", newControllers.Select(c => c.StableId + ":" + c.ConnectionType + ":" + (c.AccessError ? "ERR" : "OK") + ":" + (c.WindowsInterfaceDisabled ? "DIS" : "-") + ":" + (c.Connected ? "C" : "D")));
             if (signature != _lastRescanSignature)
             {
                 _lastRescanSignature = signature;
+                LastControllerChangeUtc = DateTime.UtcNow;
                 int oldConnected = oldControllers.Count(c => c.Connected);
                 int newConnected = newControllers.Count;
                 if (oldConnected != newConnected)
                     App.LogApp("Controller-Änderung: " + oldConnected + " → " + newConnected + " Geräte");
                 try { GamepadsChanged?.Invoke(this, EventArgs.Empty); } catch { }
             }
+        }
+
+        /// <summary>
+        /// Hält den Widerspruchs-Hinweis aktuell und schreibt ihn nur bei Änderung ins Log.
+        /// </summary>
+        private void UpdateInputVisibilityWarning(List<ControllerInfo> controllers, int occupiedXInputSlots)
+        {
+            bool mismatch = InputEndpoints.IsMismatch(controllers.Count, occupiedXInputSlots, _lastDirectInputCount);
+
+            string? disabledName = null;
+            string disabledId = "";
+            foreach (var c in controllers)
+            {
+                if (!c.WindowsInterfaceDisabled) continue;
+                disabledName = c.Name;
+                disabledId = c.InstanceId;
+                break;
+            }
+
+            // Kein markierter Eintrag? Dann im Hintergrund (Rescan-Thread, gecachte
+            // Gerätezustände) nach einer abgeschalteten Schnittstelle desselben Geräts
+            // suchen. Genau diese Schnittstelle blockiert XInput und DirectInput, während
+            // das Pad über einen anderen Weg (z.B. Raw Input) in der Liste steht.
+            if (mismatch && disabledId == "")
+            {
+                var vidPids = CollectKnownVidPids(controllers);
+                try
+                {
+                    var candidate = InputEndpoints.SelectRecoveryInterface(
+                        PhysicalDeviceResolver.DisabledInterfaces(), vidPids);
+                    if (candidate != null)
+                    {
+                        disabledId = candidate.InstanceId;
+                        if (string.IsNullOrWhiteSpace(disabledName)) disabledName = candidate.FriendlyName;
+                    }
+                }
+                catch { }
+            }
+
+            // Ohne Widerspruch gibt es nichts anzubieten – dann auch keinen Knopf.
+            string newDisabledId = mismatch ? disabledId : "";
+            bool interfaceChanged = newDisabledId != DisabledInterfaceId;
+            if (interfaceChanged)
+            {
+                DisabledInterfaceId = newDisabledId;
+                App.LogApp(newDisabledId == ""
+                    ? "Eingabe-Sicht: keine abgeschaltete Gamepad-Schnittstelle gefunden – kein Aktivieren-Knopf."
+                    : "Eingabe-Sicht: Aktivieren-Knopf für " + newDisabledId);
+            }
+
+            string warning = InputEndpoints.MismatchWarning(
+                controllers.Count, occupiedXInputSlots, _lastDirectInputCount, disabledName);
+
+            if (warning == InputVisibilityWarning)
+            {
+                // Die Suche kann erst später fündig werden, ohne dass sich der Text ändert –
+                // ohne Signal bliebe der Knopf dann unsichtbar.
+                if (interfaceChanged) NotifyGamepadsChanged();
+                return;
+            }
+            InputVisibilityWarning = warning;
+
+            if (warning == "")
+                App.LogApp("Eingabe-Sicht: Widerspruch aufgehoben – Windows führt die Geräte wieder.");
+            else
+                App.LogApp("Eingabe-Sicht: " + warning);
+
+            // Der Hinweis kann sich ändern, ohne dass sich die Geräteliste ändert (z.B. wenn
+            // die DirectInput-Enumeration kurzzeitig leer zurückkommt). Ohne dieses Signal
+            // bliebe das Banner in der Oberfläche auf dem alten Stand stehen.
+            NotifyGamepadsChanged();
+        }
+
+        private void NotifyGamepadsChanged()
+        {
+            try { GamepadsChanged?.Invoke(this, EventArgs.Empty); } catch { }
+        }
+
+        /// <summary>
+        /// Sammelt die VID/PID-Kennungen der gelisteten Controller – aus dem Feld und,
+        /// falls das leer ist (WinMM-Einträge), aus der Instanz-ID. Damit findet die
+        /// Suche nach einer abgeschalteten Geschwister-Schnittstelle auch dann etwas,
+        /// wenn nur ein Teil der Quellen die VID/PID mitliefert.
+        /// </summary>
+        private static List<string> CollectKnownVidPids(List<ControllerInfo> controllers)
+        {
+            var vidPids = new List<string>();
+            foreach (var c in controllers)
+            {
+                if (!string.IsNullOrWhiteSpace(c.VidPid)) AddVidPid(vidPids, c.VidPid);
+
+                if (DeviceHelpers.TryParseVidPid(c.InstanceId, out ushort vid, out ushort pid))
+                    AddVidPid(vidPids, DeviceHelpers.FormatVidPid(vid, pid));
+            }
+            return vidPids;
+        }
+
+        private static void AddVidPid(List<string> list, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return;
+            string trimmed = value!.Trim();
+            if (list.Contains(trimmed, StringComparer.OrdinalIgnoreCase)) return;
+            list.Add(trimmed);
+        }
+
+        /// <summary>
+        /// Kennzeichnet Controller, deren Windows-Schnittstelle deaktiviert ist
+        /// (Problemcode 22). Sie werden wie ein Gerät ohne Zugriff behandelt und tragen
+        /// einen erklärenden Grund, damit die Liste sie nicht als normalen Controller zeigt.
+        /// </summary>
+        private static void MarkDisabledInterfaces(List<ControllerInfo> controllers)
+        {
+            if (controllers.Count == 0) return;
+
+            HashSet<string> disabled;
+            try { disabled = PhysicalDeviceResolver.DisabledInterfaceKeys(); }
+            catch { return; }
+            if (disabled.Count == 0) return;
+
+            foreach (var c in controllers)
+            {
+                string key = DeviceHelpers.NormalizeInstanceKey(c.InstanceId);
+                if (key == "" || !disabled.Contains(key)) continue;
+                c.WindowsInterfaceDisabled = true;
+                c.AccessError = true;
+                c.AccessErrorReason = "In Windows deaktiviert (Problemcode 22) – im Geräte-Manager aktivieren";
+            }
+        }
+
+        /// <summary>
+        /// Ein Eintrag der Controller-Auswahlliste. Deaktivierte Windows-Schnittstellen
+        /// werden benannt statt nur mit einem Warnzeichen versehen – sonst wirkt das Gerät
+        /// wie ein normaler Controller, obwohl es nirgends Eingaben liefert.
+        /// </summary>
+        internal static string FormatControllerListEntry(DetectedController c)
+        {
+            string text = c.Name + " (" + c.ConnectionType + ")";
+            if (c.WindowsInterfaceDisabled) return text + " – deaktiviert (Windows)";
+            return c.AccessError ? text + " ⚠" : text;
         }
 
         /// <summary>
@@ -2104,6 +2397,62 @@ lock (_controllers)
         // ============================================================
 
         /// <summary>
+        /// Reagiert auf eine DirectInput-Aufzählung, die länger als fünf Sekunden braucht.
+        /// Im Staufall warten die HID-Sammlungen einzelner Tastaturen/Receiver je 10 s
+        /// auf ihr Timeout; `joy.cpl` hängt daran und stürzt als RunDLL ab. Im Hintergrund
+        /// werden die blockierenden Geräte ermittelt und ihre USB-Schnittstelle neu
+        /// gestartet (dokumentierter, umkehrbarer Rückweg). Höchstens ein Lauf gleichzeitig
+        /// und höchstens alle zehn Minuten.
+        /// </summary>
+        private static void RepairStalledDirectInput(long elapsedMs)
+        {
+            lock (_diRepairLock)
+            {
+                if (_diRepairRunning == 1) return;
+                if (DateTime.UtcNow - _diRepairLastUtc < TimeSpan.FromMinutes(10)) return;
+                _diRepairRunning = 1;
+                _diRepairLastUtc = DateTime.UtcNow;
+            }
+
+            App.LogApp("DI-Stau: Aufzählung dauerte " + elapsedMs + " ms – suche blockierende Geräte und starte sie neu.");
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try
+                {
+                    if (!InputSimulator.IsRunningAsAdmin())
+                    {
+                        App.LogApp("DI-Stau: Reparatur braucht Administratorrechte – TenzoraX erhöht starten.");
+                        return;
+                    }
+
+                    // Beide Messwege zusammenführen: Lücken zwischen den Rückrufen und
+                    // Timeouts in CreateDevice/GetCapabilities. Der zweite Weg ist der
+                    // häufigere (gemessen 26.10.2026: 10,4 s Aufzählung bei 0 Lücken).
+                    var slow = new List<string>();
+                    foreach (var vidPid in DirectInputControllerProvider.LastSlowDevices)
+                        if (!slow.Contains(vidPid, StringComparer.OrdinalIgnoreCase)) slow.Add(vidPid);
+                    foreach (var vidPid in DirectInputControllerProvider.FindSlowDevices())
+                        if (!slow.Contains(vidPid, StringComparer.OrdinalIgnoreCase)) slow.Add(vidPid);
+
+                    if (slow.Count == 0)
+                    {
+                        App.LogApp("DI-Stau: kein blockierendes Gerät zuzuordnen – kein Neustart.");
+                        return;
+                    }
+                    DeviceInterfaceRecovery.RestartStalledDevices(slow);
+                }
+                catch (Exception ex)
+                {
+                    App.LogApp("DI-Stau: Reparatur fehlgeschlagen: " + ex.GetType().Name + ": " + ex.Message);
+                }
+                finally
+                {
+                    System.Threading.Interlocked.Exchange(ref _diRepairRunning, 0);
+                }
+            });
+        }
+
+        /// <summary>
         /// Ergänzt Geräte, die ausschließlich über DirectInput oder Raw Input gefunden
         /// wurden (z.B. Bluetooth-HID mit abweichender Sammlung). Bereits gelistete
         /// Controller werden anhand Instance-ID bzw. VID/PID erkannt und übersprungen,
@@ -2113,9 +2462,33 @@ lock (_controllers)
         private void MergeAdditionalSources(List<ControllerInfo> newControllers)
         {
             var findings = new List<DetectedDeviceInfo>();
+
+            // Das Windows-Panel baut seine Liste über dieselbe DirectInput-Schnittstelle
+            // auf. Die parallele Aufzählung alle 300 ms hat joy.cpl wiederholt in den
+            // RunDLL-Hänger/Crash gezogen (gemessen 26.10.2026) – solange ein Panel offen
+            // ist, pausiert sie deshalb. XInput und Raw Input laufen weiter.
+            bool panelOpen = GameControllersPanel.IsPanelVisible();
+            if (panelOpen != _directInputPausedByPanel)
+            {
+                _directInputPausedByPanel = panelOpen;
+                App.LogApp(panelOpen
+                    ? "Panel offen: DirectInput-Aufzählung pausiert, damit joy.cpl ungestört enumerieren kann."
+                    : "Panel geschlossen: DirectInput-Aufzählung läuft wieder.");
+            }
+
             // Leise: per-Device-Logs würden bei jedem Rescan die Log-Datei fluten
             // (viele Geräte → ständiger Datei-I/O auf dem Rescan-Thread).
-            findings.AddRange(DirectInputControllerProvider.Enumerate(verboseLogging: false));
+            if (!panelOpen)
+            {
+                var diWatch = Stopwatch.StartNew();
+                var directInput = DirectInputControllerProvider.Enumerate(verboseLogging: false);
+                diWatch.Stop();
+                if (diWatch.ElapsedMilliseconds > 5000)
+                    RepairStalledDirectInput(diWatch.ElapsedMilliseconds);
+
+                _lastDirectInputCount = directInput.Count;
+                findings.AddRange(directInput);
+            }
             findings.AddRange(RawInputControllerProvider.Enumerate(verboseLogging: false));
             // Nur bei Änderung loggen (läuft alle 300 ms)
             if (findings.Count != _lastFindingsCount)
@@ -2124,6 +2497,12 @@ lock (_controllers)
                 App.LogApp("MergeAdditionalSources: " + findings.Count + " Zusatz-Findings (DI+RI), bereits " + newControllers.Count + " in Pipeline");
             }
             if (findings.Count == 0) return;
+
+            // Bereits gelistete Geräte einmal aufbereiten (Name + Instanz) – die
+            // Zusatz-Erkennung läuft alle 300 ms, deshalb nicht pro Fund neu bauen.
+            var knownDevices = new List<(string Name, string InstanceId)>(newControllers.Count);
+            foreach (var c in newControllers)
+                knownDevices.Add((c.Name ?? "", c.InstanceId ?? ""));
 
             int duplicates = 0, added = 0;
             foreach (var f in findings)
@@ -2137,14 +2516,37 @@ lock (_controllers)
                         duplicate = true;
                         break;
                     }
-                    if (!string.IsNullOrEmpty(f.DeviceInstanceId) &&
-                        string.Equals(f.DeviceInstanceId, c.InstanceId, StringComparison.OrdinalIgnoreCase))
+                    // Instanz-Vergleich über den kanonischen Schlüssel: `#`/`\` und
+                    // Groß-/Kleinschreibung dürfen aus demselben Gerät kein zweites
+                    // Listeneintrag-Paar machen.
+                    string findingKey = DeviceHelpers.NormalizeInstanceKey(f.DeviceInstanceId);
+                    if (findingKey != "" && findingKey == DeviceHelpers.NormalizeInstanceKey(c.InstanceId))
                     {
                         duplicate = true;
                         break;
                     }
                 }
                 if (duplicate) { duplicates++; continue; }
+
+                // Windows legt zu jedem XInput-Pad zusätzlich eine HID-Fassade mit
+                // Microsoft-VID/PID an (VID_045E&PID_02FF, „XINPUT-kompatibles
+                // HID-Gerät"). Sie ist über den XInput-Slot bereits in der Pipeline;
+                // ein zweiter Eintrag würde dasselbe Pad doppelt führen und dessen
+                // 16-Byte-XInput-Report fälschlich auswerten (dauerhaft „R2" plus
+                // zappelnde Sticks, gemessen 26.10.2026).
+                // Immer überspringen – auch wenn (noch) kein XInput-Slot in der
+                // Pipeline steht: dieses Gerät ist die Windows-Fassade eines
+                // XInput-Pads und liefert keinen eigenständigen Eingabeweg.
+                if (IsXInputHidFacade(f.Vid, f.Pid))
+                {
+                    duplicates++;
+                    if (!_loggedXInputHidSkip)
+                    {
+                        _loggedXInputHidSkip = true;
+                        App.LogApp("Merge: XInput-HID-Fassade übersprungen (wird über XInput gelesen): " + f.DeviceInstanceId);
+                    }
+                    continue;
+                }
 
                 string instanceId = f.DeviceInstanceId ?? "";
                 var hidInfo = new HidDeviceInfo
@@ -2166,9 +2568,7 @@ lock (_controllers)
                                    (!string.IsNullOrEmpty(hidInfo.Name) ? hidInfo.Name : hidInfo.VidPid));
                 }
 
-                string displayName = !string.IsNullOrEmpty(hidInfo.Name)
-                    ? hidInfo.Name
-                    : !string.IsNullOrEmpty(hidInfo.VidPid) ? hidInfo.VidPid : "Gamepad";
+                string displayName = ResolveAdditionalDisplayName(f, findings, knownDevices, hidProductName: channel?.ProductName);
 
                 string sourceApi = f.Api == ControllerApi.DirectInput ? "DirectInput" : "Raw Input";
                 newControllers.Add(new ControllerInfo
@@ -2193,6 +2593,72 @@ lock (_controllers)
             // Nur bei tatsächlicher Änderung loggen.
             if (added > 0)
                 App.LogApp("MergeAdditionalSources: " + added + " neue Geräte hinzugefügt, " + duplicates + " Duplikate übersprungen");
+        }
+
+        /// <summary>
+        /// Anzeigename für ein Zusatz-Gerät. Raw Input liefert keinen Produktnamen –
+        /// ohne Auflösung stünde in der Liste nur „VID_2DC8&amp;PID_3024“. Reihenfolge:
+        /// eigener echter Name → HID-Produktname des Geräts (HidD_GetProductString) →
+        /// echter Windows-Gerätename der physischen Instanz (notfalls vom Elternknoten)
+        /// → gleiche VID/PID in derselben Fundliste → bereits gelistete Instanz in der
+        /// Pipeline → eigener (generischer) Name → Familienname aus VID → VID/PID als
+        /// letzter Rückfall.
+        /// </summary>
+        /// <param name="windowsName">Nur für Tests: Ersatz für die SetupAPI-Abfrage.</param>
+        /// <param name="hidProductName">Produktname aus dem HID-Descriptor, sofern der
+        /// Eingabekanal geöffnet werden konnte – bei Bluetooth-Pads (z.B. 8BitDo) der
+        /// einzige Ort, an dem der echte Produktname steht.</param>
+        internal static string ResolveAdditionalDisplayName(
+            DetectedDeviceInfo finding,
+            IReadOnlyList<DetectedDeviceInfo> findings,
+            IReadOnlyList<(string Name, string InstanceId)> pipeline,
+            Func<string, ushort, ushort, string>? windowsName = null,
+            string? hidProductName = null)
+        {
+            string own = (finding.Name ?? "").Trim();
+            if (DeviceNameResolver.IsRealProductName(own)) return own;
+
+            // Der Gerätename aus dem HID-Descriptor ist der Produktname, den der
+            // Hersteller selbst hinterlegt hat – Windows zeigt ihn oft gar nicht an
+            // (Bluetooth-Pad: dort steht nur „Bluetooth-HID-Gerät“).
+            string hidName = (hidProductName ?? "").Trim();
+            if (DeviceNameResolver.IsRealProductName(hidName)) return hidName;
+
+            // Echter Produktname der physischen Instanz – auch über den Elternknoten.
+            string resolved = (windowsName ?? PhysicalDeviceResolver.ResolveProductName)(
+                finding.DeviceInstanceId, finding.Vid, finding.Pid);
+            resolved = (resolved ?? "").Trim();
+            if (DeviceNameResolver.IsRealProductName(resolved)) return resolved;
+
+            // Andere API im selben Durchlauf hat das Gerät schon benannt (DirectInput).
+            if (!string.IsNullOrEmpty(finding.VidPid))
+            {
+                foreach (var other in findings)
+                {
+                    if (!string.Equals(other.VidPid, finding.VidPid, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (DeviceNameResolver.IsRealProductName(other.Name)) return other.Name.Trim();
+                }
+            }
+
+            // Derselbe Gerätepfad steht schon in der Pipeline (andere Schreibweise).
+            if (!string.IsNullOrEmpty(finding.DeviceInstanceId))
+            {
+                foreach (var known in pipeline)
+                {
+                    if (!string.Equals(known.InstanceId, finding.DeviceInstanceId, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (DeviceNameResolver.IsRealProductName(known.Name)) return known.Name.Trim();
+                }
+            }
+
+            // Eigener Name ist generisch, stammt aber vom Gerät – besser als eine VID/PID.
+            if (!string.IsNullOrWhiteSpace(own) && !own.StartsWith("VID_", StringComparison.OrdinalIgnoreCase))
+                return own;
+
+            // Familienname („8BitDo Gamepad“) aus der VID, falls Windows nichts hergibt.
+            if (!string.IsNullOrWhiteSpace(resolved) && !DeviceHelpers.IsDriverPlaceholderName(resolved))
+                return resolved;
+
+            return !string.IsNullOrEmpty(finding.VidPid) ? finding.VidPid : "Gamepad";
         }
 
         /// <summary>
@@ -2242,6 +2708,13 @@ lock (_controllers)
             }
 
             sb.AppendLine();
+            sb.AppendLine("--- Zuletzt zusammengefasste Listeneinträge ---");
+            lock (_collapsedInstancesLock)
+            {
+                sb.Append(FormatCollapsedInstances(_collapsedInstances));
+            }
+
+            sb.AppendLine();
             sb.AppendLine("--- ViGEm-Xbox-Spiegelung (live) ---");
             sb.AppendLine("Status: " + (_vigemEnabled ? _vigemBridge.Status : "aus (Spiegelung nicht aktiv)"));
 
@@ -2274,37 +2747,6 @@ lock (_controllers)
             else
             {
                 sb.AppendLine("Spiegelung: nicht aktiv (ViGEmBus-Treiber fehlt oder ausgeschaltet)");
-            }
-
-            sb.AppendLine();
-            sb.AppendLine("--- Akkustand ---");
-            lock (_controllers)
-            {
-                if (_selectedIndex >= 0)
-                {
-                    int pos = 0;
-                    foreach (var c in _controllers)
-                    {
-                        if (!c.Connected) continue;
-                        if (pos == _selectedIndex)
-                        {
-                            if (c.IsXInput)
-                                sb.AppendLine(c.HidChannel?.BatteryPercent is int hbp
-                                    ? "Aktuell: " + hbp + "% | Quelle: HID-Report (echter Wert)"
-                                    : "Quelle: XInput (XInputGetBatteryInformation – vier Stufen; am Kabel immer FULL)");
-                            else if (c.HidChannel?.BatteryPercent is int bp)
-                                sb.AppendLine("Aktuell: " + bp + "% | Quelle: " + (c.HidChannel.BatterySource ?? "HID-Report") + " (echter Wert)");
-                            else
-                                sb.AppendLine("Erkennung: aktiv (HID-Report/Feature-Scan), noch kein stabiler Wert – Schätzung greift");
-                            break;
-                        }
-                        pos++;
-                    }
-                }
-                else
-                {
-                    sb.AppendLine("(kein Controller ausgewählt – Schätzung greift)");
-                }
             }
 
             sb.AppendLine();
@@ -2408,6 +2850,71 @@ lock (_controllers)
         //  READ XINPUT CONTROLLER
         // ============================================================
 
+        /// <summary>
+        /// Nimmt einen belegten XInput-Slot sofort auf, wenn die Controller-Liste leer ist.
+        /// Hintergrund (gemessen 26.10.2026): Der Rescan dauert auf Systemen mit hängender
+        /// DirectInput-Aufzählung 40-80 s. Bis dahin zeigte die App „nicht verbunden“,
+        /// obwohl XInput das Pad bereits führte. Der Eintrag ist bewusst schlank – der
+        /// nächste Rescan ersetzt ihn durch den vollständigen (mit HID-Namen/Akku).
+        /// </summary>
+        private void TryAdoptXInputSlot()
+        {
+            lock (_controllers)
+                if (_controllers.Count > 0) return;
+
+            for (int slot = 0; slot < 4; slot++)
+            {
+                if (InCooldown(_xinputCooldownUntil, slot)) continue;
+                if (XInputGetState((uint)slot, out _) != ERROR_SUCCESS) continue;
+
+                var ctrl = new ControllerInfo
+                {
+                    SlotIndex = slot,
+                    IsXInput = true,
+                    Name = "Xbox-Controller",
+                    RealName = "Xbox-Controller",
+                    Connected = true,
+                    ConnectionType = ConnectionTypeUnknown
+                };
+
+                lock (_controllers) { _controllers.Add(ctrl); }
+                App.LogApp("XInput-Controller sofort übernommen: Slot " + slot + " (Rescan läuft weiter)");
+                try { GamepadsChanged?.Invoke(this, EventArgs.Empty); } catch { }
+                return;
+            }
+        }
+
+        /// <summary>
+        /// Fragt die XInput-Slots erneut ab, wenn aktuell kein Controller ausgewählt ist.
+        /// Ein als getrennt markierter Controller wird so sofort wieder „verbunden“,
+        /// ohne auf den (potenziell minutenlangen) Rescan zu warten. Es wird nichts
+        /// neu aufgebaut: nur der Zustand des vorhandenen Eintrags wird korrigiert.
+        /// </summary>
+        private void TryReconnectXInput()
+        {
+            List<ControllerInfo> candidates;
+            lock (_controllers)
+                candidates = _controllers.Where(c => c.IsXInput && !c.Connected).ToList();
+
+            foreach (var ctrl in candidates)
+            {
+                if (InCooldown(_xinputCooldownUntil, ctrl.SlotIndex)) continue;
+                if (XInputGetState((uint)ctrl.SlotIndex, out _) != ERROR_SUCCESS) continue;
+
+                bool becameConnected = false;
+                lock (_controllers)
+                {
+                    if (!ctrl.Connected) { ctrl.Connected = true; becameConnected = true; }
+                }
+
+                if (becameConnected)
+                {
+                    App.LogApp("XInput-Controller wieder verbunden: Slot " + ctrl.SlotIndex);
+                    try { GamepadsChanged?.Invoke(this, EventArgs.Empty); } catch { }
+                }
+            }
+        }
+
         private void ReadXInput(ControllerInfo ctrl)
         {
             // Skip polling a slot that recently disconnected (driver teardown in progress)
@@ -2427,7 +2934,6 @@ lock (_controllers)
                         {
                             ControllerName = "None",
                             ConnectionType = "N/A",
-                            BatteryInfo = "N/A",
                             PressedButtons = new List<string>()
                         });
                         GamepadsChanged?.Invoke(this, EventArgs.Empty);
@@ -2479,28 +2985,12 @@ lock (_controllers)
             if (ry > 0.7f) pressed.Add("RS_UP");
             else if (ry < -0.7f) pressed.Add("RS_DOWN");
 
-            // Batterie nur ~1×/Sekunde abfragen – nicht bei jedem der ~250 Polls pro
-            // Sekunde (P/Invoke ist teuer; der Stand ändert sich ohnehin kaum).
-            string batteryInfo = _lastBatteryInfo;
-            if ((DateTime.UtcNow - _lastBatteryReadAt).TotalSeconds >= 1)
-            {
-                _lastBatteryReadAt = DateTime.UtcNow;
-                batteryInfo = ReadBatteryInfo(ctrl.SlotIndex, out bool onCable);
-                // Der HID-Wert desselben Pads ist feiner als XInputs vier Stufen
-                // (am Kabel meldet XInput pauschal FULL = 100 %).
-                batteryInfo = BatteryEstimate.PreferMorePrecise(batteryInfo, ctrl.HidChannel?.BatteryPercent);
-                _lastBatteryInfo = batteryInfo;
-                _lastOnCable = onCable;
-            }
-
             try
             {
                 StateChanged?.Invoke(this, new ControllerStateEventArgs
                 {
                     ControllerName = ctrl.Name,
                     ConnectionType = ctrl.ConnectionType,
-                    BatteryInfo = batteryInfo,
-                    OnCable = _lastOnCable,
                     PressedButtons = pressed,
                     LeftStickX = lx, LeftStickY = ly,
                     RightStickX = rx, RightStickY = ry
@@ -2510,43 +3000,6 @@ lock (_controllers)
             {
                 App.LogApp("Controller StateChanged-Fehler: " + ex.Message);
             }
-        }
-
-        /// <summary>
-        /// Liest den XInput-Akkustand eines Slots. <paramref name="onCable"/> meldet
-        /// dabei den BATTERY_TYPE_WIRED (USB verbunden). Gemessen am 13.09.2026 liefert
-        /// das Pad diesen Typ am Kabel **und** über den Funkempfänger, jeweils mit
-        /// BATTERY_LEVEL_FULL – der Stufenwert ist hier also keine Messung.
-        /// </summary>
-        private static string ReadBatteryInfo(int slotIndex, out bool onCable)
-        {
-            onCable = false;
-            try
-            {
-                uint brc = XInputGetBatteryInformation((uint)slotIndex, BATTERY_DEVTYPE_GAMEPAD, out var batt);
-                if (brc == ERROR_SUCCESS)
-                {
-                    onCable = batt.BatteryType == BATTERY_TYPE_WIRED;
-
-                    // Am Kabel ist der Stufenwert keine Messung: XInput meldet dort pauschal
-                    // FULL (100 %). Dann lieber „unbekannt“ – der HID-Wert desselben Pads
-                    // (falls vorhanden) oder der zuletzt gemessene Stand übernimmt.
-                    if (!BatteryEstimate.IsXInputLevelMeaningful(batt.BatteryType))
-                        return "N/A";
-
-                    // Batteriestand immer anzeigen - egal ob Kabel oder Wireless
-                    return batt.BatteryLevel switch
-                    {
-                        BATTERY_LEVEL_EMPTY  => "0%",
-                        BATTERY_LEVEL_LOW    => "33%",
-                        BATTERY_LEVEL_MEDIUM => "67%",
-                        BATTERY_LEVEL_FULL   => "100%",
-                        _                    => "N/A"
-                    };
-                }
-            }
-            catch { }
-            return "N/A";
         }
 
         // ============================================================
@@ -2565,9 +3018,6 @@ lock (_controllers)
                 {
                     ControllerName = ctrl.Name,
                     ConnectionType = ctrl.ConnectionType,
-                    // Echter Akkustand aus dem HID-Report, falls der generische Leser
-                    // einen stabilen Wert gefunden hat (sonst „N/A“ → Schätzung greift).
-                    BatteryInfo = channel.BatteryPercent is int p ? p + "%" : "N/A",
                     PressedButtons = pressed,
                     LeftStickX = lx, LeftStickY = ly,
                     RightStickX = rx, RightStickY = ry
@@ -2608,7 +3058,6 @@ lock (_controllers)
                             {
                                 ControllerName = "None",
                                 ConnectionType = "N/A",
-                                BatteryInfo = "N/A",
                                 PressedButtons = new List<string>()
                             });
                             GamepadsChanged?.Invoke(this, EventArgs.Empty);
@@ -2658,27 +3107,29 @@ lock (_controllers)
                 int x = joyInfo.dwXpos;
                 int y = joyInfo.dwYpos;
                 int r = joyInfo.dwRpos;
-                int z = joyInfo.dwZpos;
+                int u = joyInfo.dwUpos;
 
                 // Get axis ranges from caps (JOYCAPSW ist jetzt nativ korrekt ausgerichtet)
                 int xMin = 0, xMax = 65535;
                 int yMin = 0, yMax = 65535;
                 int rMin = 0, rMax = 65535;
-                int zMin = 0, zMax = 65535;
+                int uMin = 0, uMax = 65535;
                 try
                 {
                     joyGetDevCapsW((uint)ctrl.SlotIndex, out JOYCAPSW caps, Marshal.SizeOf<JOYCAPSW>());
                     xMin = (int)caps.wXmin; xMax = (int)caps.wXmax;
                     yMin = (int)caps.wYmin; yMax = (int)caps.wYmax;
                     rMin = (int)caps.wRmin; rMax = (int)caps.wRmax;
-                    zMin = (int)caps.wUmin; zMax = (int)caps.wUmax;
+                    uMin = (int)caps.wUmin; uMax = (int)caps.wUmax;
                 }
                 catch { }
 
                 float lx = NormalizeAxis(x, xMin, xMax);
                 float ly = NormalizeAxis(y, yMin, yMax);
                 float rx = NormalizeAxis(r, rMin, rMax);
-                float ry = NormalizeAxis(z, zMin, zMax);
+                // Rechter Stick Y ist die U-Achse (HID Ry) – vorher wurde dwZpos (Z-Achse,
+                // meist linker Trigger) gelesen, aber mit dem U-Bereich normiert.
+                float ry = NormalizeAxis(u, uMin, uMax);
 
                 if (lx < -0.7f) pressed.Add("LS_LEFT");
                 else if (lx > 0.7f) pressed.Add("LS_RIGHT");
@@ -2696,7 +3147,6 @@ lock (_controllers)
                     {
                         ControllerName = ctrl.Name,
                         ConnectionType = ctrl.ConnectionType,
-                        BatteryInfo = "N/A",
                         PressedButtons = pressed,
                         LeftStickX = lx, LeftStickY = ly,
                         RightStickX = rx, RightStickY = ry
@@ -2709,6 +3159,14 @@ lock (_controllers)
             }
             catch { }
         }
+
+        /// <summary>
+        /// True für die HID-Fassade, die Windows zu jedem XInput-Pad anlegt
+        /// (VID_045E&PID_02FF). Sie ist kein eigenständiges Gerät und darf weder
+        /// als Zusatz-Controller erscheinen noch über den Fallback gelesen werden.
+        /// </summary>
+        private static bool IsXInputHidFacade(ushort vid, ushort pid)
+            => vid == 0x045E && pid == 0x02FF;
 
         private static float NormalizeAxis(int value, int min, int max)
         {

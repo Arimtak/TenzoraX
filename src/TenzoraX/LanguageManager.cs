@@ -46,21 +46,14 @@ namespace TenzoraX
         public string Status_Connected => this["Status_Connected"];
         public string Status_Disconnected => this["Status_Disconnected"];
         public string Status_Paused => this["Status_Paused"];
-        public string Battery_Label => this["Battery_Label"];
-        public string Battery_NA => this["Battery_NA"];
-        public string Battery_Low => this["Battery_Low"];
-        public string Battery_Charging => this["Battery_Charging"];
-        public string Battery_LastSeen => this["Battery_LastSeen"];
-        public string Battery_AgeMinutes => this["Battery_AgeMinutes"];
-        public string Battery_AgeHours => this["Battery_AgeHours"];
-        public string Battery_AgeDays => this["Battery_AgeDays"];
-        public string Battery_JustNow => this["Battery_JustNow"];
         public string Combo_NoController => this["Combo_NoController"];
         public string Status_AccessError => this["Status_AccessError"];
         public string Input_Label => this["Input_Label"];
         public string Input_Active => this["Input_Active"];
         public string Input_Inactive => this["Input_Inactive"];
         public string History_Button => this["History_Button"];
+        public string Gamepad_Collapse => this["Gamepad_Collapse"];
+        public string Gamepad_Expand => this["Gamepad_Expand"];
         public string History_Title => this["History_Title"];
         public string History_Empty => this["History_Empty"];
         public string History_LastUsed => this["History_LastUsed"];
@@ -108,6 +101,13 @@ namespace TenzoraX
         public string Edit_AdminUser => this["Edit_AdminUser"];
         public string Edit_AdminElevated => this["Edit_AdminElevated"];
 
+        public string Design_Section => this["Design_Section"];
+        public string Design_Label => this["Design_Label"];
+        public string Design_Flat => this["Design_Flat"];
+        public string Design_3D => this["Design_3D"];
+        public string Design_Shine => this["Design_Shine"];
+        public string Design_Hint => this["Design_Hint"];
+
         public string Background_Section => this["Background_Section"];
         public string Background_EnableTitle => this["Background_EnableTitle"];
         public string Background_EnableHint => this["Background_EnableHint"];
@@ -117,15 +117,6 @@ namespace TenzoraX
         public string Background_QualityReduced => this["Background_QualityReduced"];
         public string Background_QualityMinimal => this["Background_QualityMinimal"];
         public string Background_QualityHint => this["Background_QualityHint"];
-
-        public string Battery_Title => this["Battery_Title"];
-        public string Battery_Enable => this["Battery_Enable"];
-        public string Battery_HoursLabel => this["Battery_HoursLabel"];
-        public string Battery_HoursUnit => this["Battery_HoursUnit"];
-        public string Battery_TrayEnable => this["Battery_TrayEnable"];
-        public string Battery_Animation => this["Battery_Animation"];
-        public string Battery_Reset => this["Battery_Reset"];
-        public string Battery_Calculated => this["Battery_Calculated"];
 
         public string Tray_Open => this["Tray_Open"];
         public string Tray_SwitchProfile => this["Tray_SwitchProfile"];
@@ -151,6 +142,9 @@ namespace TenzoraX
         public string ImagePickerTitle => this["ImagePickerTitle"];
 
         public string Btn_TestOutput => this["Btn_TestOutput"];
+        public string Btn_MouseL => this["Btn_MouseL"];
+        public string Btn_MouseR => this["Btn_MouseR"];
+        public string Btn_MouseM => this["Btn_MouseM"];
 
         public string Diag_Button => this["Diag_Button"];
         public string Diag_Title => this["Diag_Title"];
@@ -178,17 +172,6 @@ namespace TenzoraX
         public string Settings_StartMinimizedHint => this["Settings_StartMinimizedHint"];
         public string Settings_MinimizeToTrayHint => this["Settings_MinimizeToTrayHint"];
         public string Settings_AdminHint => this["Settings_AdminHint"];
-
-        public string Battery_Section => this["Battery_Section"];
-        public string Battery_EnableTitle => this["Battery_EnableTitle"];
-        public string Battery_EnableHint => this["Battery_EnableHint"];
-        public string Battery_Capacity => this["Battery_Capacity"];
-        public string Battery_CapacityHint => this["Battery_CapacityHint"];
-        public string Battery_TrayTitle => this["Battery_TrayTitle"];
-        public string Battery_TrayHint => this["Battery_TrayHint"];
-        public string Battery_AnimationTitle => this["Battery_AnimationTitle"];
-        public string Battery_AnimationHint => this["Battery_AnimationHint"];
-        public string Battery_ResetDefault => this["Battery_ResetDefault"];
 
         public string Notify_Section => this["Notify_Section"];
         public string Notify_EnableTitle => this["Notify_EnableTitle"];
@@ -229,6 +212,8 @@ namespace TenzoraX
         public string InProgress_Badge => this["InProgress_Badge"];
         public string Vigem_OpenControllers => this["Vigem_OpenControllers"];
         public string Vigem_OpenControllersHint => this["Vigem_OpenControllersHint"];
+        public string GamepadPanel_FailedTitle => this["GamepadPanel_FailedTitle"];
+        public string GamepadPanel_FailedMsg => this["GamepadPanel_FailedMsg"];
         public string Main_InProgressHint => this["Main_InProgressHint"];
         public string Tabs_Combinations => this["Tabs_Combinations"];
         public string Tabs_Controller => this["Tabs_Controller"];
@@ -277,21 +262,14 @@ namespace TenzoraX
                 ["Status_Connected"] = "Connected",
                 ["Status_Disconnected"] = "Disconnected",
                 ["Status_Paused"] = "Paused",
-                ["Battery_Label"] = "Battery:",
-                ["Battery_NA"] = "N/A",
-                ["Battery_Low"] = "⚠ Battery low!",
-                ["Battery_Charging"] = "⚡ Charging",
-                ["Battery_LastSeen"] = "{0}% ({1} ago)",
-                ["Battery_AgeMinutes"] = "{0} min",
-                ["Battery_AgeHours"] = "{0} h",
-                ["Battery_AgeDays"] = "{0} d",
-                ["Battery_JustNow"] = "just now",
                 ["Combo_NoController"] = "No controller detected",
                 ["Status_AccessError"] = "Detected, but access not possible",
                 ["Input_Label"] = "Input:",
                 ["Input_Active"] = "Active",
                 ["Input_Inactive"] = "No activity",
                 ["History_Button"] = "Controller history",
+                ["Gamepad_Collapse"] = "Hide controller field (enlarge keyboard)",
+                ["Gamepad_Expand"] = "Show controller field",
                 ["History_Title"] = "Controller History",
                 ["History_Empty"] = "No history yet.",
                 ["History_LastUsed"] = "Last used: {0}",
@@ -341,6 +319,13 @@ namespace TenzoraX
                 ["Edit_AdminUser"] = "● User",
                 ["Edit_AdminElevated"] = "● Administrator",
 
+                ["Design_Section"] = "🎨 DESIGN",
+                ["Design_Label"] = "Surface style:",
+                ["Design_Flat"] = "Flat",
+                ["Design_3D"] = "3D",
+                ["Design_Shine"] = "Shine",
+                ["Design_Hint"] = "3D gives panels, buttons and keys light from above, edges and depth. Shine adds a glossy highlight edge. Applies immediately.",
+
                 ["Background_Section"] = "🎛 APPEARANCE",
                 ["Background_EnableTitle"] = "Animated background (GhostFibers)",
                 ["Background_EnableHint"] = "Draws a slow-moving field of glowing fibers behind the interface (GPU pixel shader). Turning it off saves power in battery mode.",
@@ -350,15 +335,6 @@ namespace TenzoraX
                 ["Background_QualityReduced"] = "Economy - 20 fps, 3 layers",
                 ["Background_QualityMinimal"] = "Minimal - 15 fps, 2 layers, no grain",
                 ["Background_QualityHint"] = "Automatic makes the background cheaper instead of switching it off when the display cannot keep up: first fewer fiber layers and fewer frames per second, and only as a last resort off.",
-
-                ["Battery_Title"] = "Battery",
-                ["Battery_Enable"] = "Battery system",
-                ["Battery_HoursLabel"] = "Estimated battery life",
-                ["Battery_HoursUnit"] = "Hours",
-                ["Battery_TrayEnable"] = "Battery in tray",
-                ["Battery_Animation"] = "Animation",
-                ["Battery_Reset"] = "Reset battery to 100%",
-                ["Battery_Calculated"] = "Calculated: {0} min ({1:F1}%/min)",
 
                 ["Tray_Open"] = "Open TenzoraX",
                 ["Tray_SwitchProfile"] = "Switch profile",
@@ -428,17 +404,6 @@ namespace TenzoraX
                 ["Settings_MinimizeToTrayHint"] = "Closing the window minimizes TenzoraX to the tray instead of exiting.",
                 ["Settings_AdminHint"] = "Allows input in games that require administrator rights. Requires a restart.",
 
-                ["Battery_Section"] = "🔋 BATTERY",
-                ["Battery_EnableTitle"] = "Enable battery indicator",
-                ["Battery_EnableHint"] = "Shows the estimated controller battery level in TenzoraX.",
-                ["Battery_Capacity"] = "Battery capacity:",
-                ["Battery_CapacityHint"] = "Sets the total capacity of the controller battery. After confirmation the battery is reset to 100%.",
-                ["Battery_TrayTitle"] = "Show battery status in the system tray",
-                ["Battery_TrayHint"] = "Shows the current battery level as an icon in the notification area of the taskbar.",
-                ["Battery_AnimationTitle"] = "Show battery charge animation",
-                ["Battery_AnimationHint"] = "Shows a visual charge animation in the tray icon while the controller is in use.",
-                ["Battery_ResetDefault"] = "Reset to default values",
-
                 ["Notify_Section"] = "🔔 HOTKEY NOTIFICATIONS",
                 ["Notify_EnableTitle"] = "Show notifications",
                 ["Notify_EnableHint"] = "Shows a visual notification on the screen when a saved controller combination is triggered.",
@@ -482,6 +447,8 @@ namespace TenzoraX
                 ["InProgress_Badge"] = "In progress",
                 ["Vigem_OpenControllers"] = "Open Game Controllers window",
                 ["Vigem_OpenControllersHint"] = "Shows all installed controllers – the virtual Xbox 360 also appears there.",
+                ["GamepadPanel_FailedTitle"] = "Game Controllers window",
+                ["GamepadPanel_FailedMsg"] = "Windows did not show the Game Controllers window. The panel is probably stuck in a device change – please try again in a moment. Details are in the log (app.log).",
                 ["Main_InProgressHint"] = "Xbox 360 mirroring & HidHide: in progress",
                 ["Tabs_Combinations"] = "Saved combinations",
                 ["Tabs_Controller"] = "Xbox 360 & HidHide",
@@ -529,21 +496,14 @@ namespace TenzoraX
                 ["Status_Connected"] = "Verbunden",
                 ["Status_Disconnected"] = "Getrennt",
                 ["Status_Paused"] = "Pausiert",
-                ["Battery_Label"] = "Batterie:",
-                ["Battery_NA"] = "N/A",
-                ["Battery_Low"] = "⚠ Akku niedrig!",
-                ["Battery_Charging"] = "⚡ Lädt",
-                ["Battery_LastSeen"] = "{0}% (vor {1})",
-                ["Battery_AgeMinutes"] = "{0} min",
-                ["Battery_AgeHours"] = "{0} h",
-                ["Battery_AgeDays"] = "{0} T",
-                ["Battery_JustNow"] = "gerade eben",
                 ["Combo_NoController"] = "Kein Controller erkannt",
                 ["Status_AccessError"] = "Erkannt, aber Zugriff nicht möglich",
                 ["Input_Label"] = "Eingabe:",
                 ["Input_Active"] = "Aktiv",
                 ["Input_Inactive"] = "Keine Aktivität",
                 ["History_Button"] = "Controller-Verlauf",
+                ["Gamepad_Collapse"] = "Controller-Feld ausblenden (Tastatur vergrößern)",
+                ["Gamepad_Expand"] = "Controller-Feld einblenden",
                 ["History_Title"] = "Controller-Verlauf",
                 ["History_Empty"] = "Noch kein Verlauf.",
                 ["History_LastUsed"] = "Zuletzt verwendet: {0}",
@@ -593,6 +553,13 @@ namespace TenzoraX
                 ["Edit_AdminUser"] = "● Benutzer",
                 ["Edit_AdminElevated"] = "● Administrator",
 
+                ["Design_Section"] = "🎨 DESIGN",
+                ["Design_Label"] = "Oberflächen-Stil:",
+                ["Design_Flat"] = "Flach",
+                ["Design_3D"] = "3D",
+                ["Design_Shine"] = "Shine",
+                ["Design_Hint"] = "3D gibt Flächen, Tasten und Feldern Licht von oben, Kanten und Tiefe. Shine setzt zusätzlich eine glänzende Kante. Wirkt sofort.",
+
                 ["Background_Section"] = "🎛 OBERFLÄCHE",
                 ["Background_EnableTitle"] = "Animierter Hintergrund (GhostFibers)",
                 ["Background_EnableHint"] = "Zeichnet ein langsam ziehendes Feld leuchtender Fasern hinter der Oberfläche (GPU-Pixel-Shader). Ausschalten spart Strom im Akkubetrieb.",
@@ -602,15 +569,6 @@ namespace TenzoraX
                 ["Background_QualityReduced"] = "Sparsam – 20 Bilder/s, 3 Schichten",
                 ["Background_QualityMinimal"] = "Minimal – 15 Bilder/s, 2 Schichten, ohne Grain",
                 ["Background_QualityHint"] = "Automatisch macht den Hintergrund sparsamer, statt ihn abzuschalten, wenn die Anzeige nicht mitkommt: erst weniger Faserschichten und weniger Bilder/s, zuletzt ganz aus.",
-
-                ["Battery_Title"] = "Batterie",
-                ["Battery_Enable"] = "Batterie-System",
-                ["Battery_HoursLabel"] = "Geschätzte Akkulaufzeit",
-                ["Battery_HoursUnit"] = "Stunden",
-                ["Battery_TrayEnable"] = "Batterie im Tray",
-                ["Battery_Animation"] = "Animation",
-                ["Battery_Reset"] = "Batterie auf 100% zurücksetzen",
-                ["Battery_Calculated"] = "Berechnet: {0} Min ({1:F1}%/Min)",
 
                 ["Tray_Open"] = "TenzoraX öffnen",
                 ["Tray_SwitchProfile"] = "Profil wechseln",
@@ -680,17 +638,6 @@ namespace TenzoraX
                 ["Settings_MinimizeToTrayHint"] = "Beim Schließen wird TenzoraX minimiert statt beendet.",
                 ["Settings_AdminHint"] = "Ermöglicht die Eingabe in Spielen, die Admin-Rechte benötigen. Erfordert einen Neustart.",
 
-                ["Battery_Section"] = "🔋 BATTERIE",
-                ["Battery_EnableTitle"] = "Batterieanzeige aktivieren",
-                ["Battery_EnableHint"] = "Zeigt den geschätzten Controller-Akkustand in TenzoraX an.",
-                ["Battery_Capacity"] = "Akkukapazität:",
-                ["Battery_CapacityHint"] = "Legt die Gesamtkapazität des Controller-Akkus fest. Nach Bestätigung wird der Akku auf 100 % zurückgesetzt.",
-                ["Battery_TrayTitle"] = "Batteriestatus in Taskleiste anzeigen",
-                ["Battery_TrayHint"] = "Zeigt den aktuellen Akkustand als Symbol im Infobereich der Taskleiste an.",
-                ["Battery_AnimationTitle"] = "Akku-Ladeanimation anzeigen",
-                ["Battery_AnimationHint"] = "Zeigt eine optische Ladeanimation im Taskleistensymbol an, während der Controller aktiv genutzt wird.",
-                ["Battery_ResetDefault"] = "Auf Standardwerte zurücksetzen",
-
                 ["Notify_Section"] = "🔔 HOTKEY-BENACHRICHTIGUNGEN",
                 ["Notify_EnableTitle"] = "Benachrichtigungen anzeigen",
                 ["Notify_EnableHint"] = "Zeigt eine visuelle Benachrichtigung auf dem Bildschirm an, wenn eine gespeicherte Controller-Kombination ausgelöst wird.",
@@ -734,6 +681,8 @@ namespace TenzoraX
                 ["InProgress_Badge"] = "In Bearbeitung",
                 ["Vigem_OpenControllers"] = "Game Controller-Fenster öffnen",
                 ["Vigem_OpenControllersHint"] = "Zeigt alle installierten Controller – auch die virtuelle Xbox 360 erscheint dort.",
+                ["GamepadPanel_FailedTitle"] = "Gamecontroller-Fenster",
+                ["GamepadPanel_FailedMsg"] = "Windows hat das Fenster „Gamecontroller“ nicht angezeigt. Das Panel hängt vermutlich in einer Geräteänderung – bitte gleich noch einmal versuchen. Einzelheiten stehen im Log (app.log).",
                 ["Main_InProgressHint"] = "Xbox-360-Spiegelung & HidHide: in Bearbeitung",
                 ["Tabs_Combinations"] = "Gespeicherte Kombinationen",
                 ["Tabs_Controller"] = "Xbox 360 & HidHide",

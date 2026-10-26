@@ -8,6 +8,10 @@ Free to use for everyone (MIT license).
 
 ---
 
+## How it works
+
+TenzoraX reads the controller through HID, DirectInput, XInput and Raw Input, merges the reports into one device view, and sends the mapped keyboard or mouse action with `SendInput`. Optional Xbox 360 mirroring uses ViGEmBus; HidHide can hide the physical controller from games.
+
 ## Installation
 
 1. Download the latest version from [Releases](https://github.com/Arimtak/TenzoraX/releases).
@@ -37,7 +41,14 @@ More features:
 - 🕘 **History** – shows every controller ever detected.
 - 🔍 **Diagnostics** – checks whether inputs are being received.
 - 🎮 **Controller icon in the header** – opens the Windows "Game Controllers" window.
-- **Tray icon** – shows your controller's battery level.
+- **Tray icon** – quick access to the app and current controller status.
+
+## What's new in 1.5.0
+
+- More reliable controller detection and reconnection across HID, DirectInput, XInput and Raw Input.
+- Automatic recovery when a controller interface stops responding.
+- The Windows "Game Controllers" panel opens safely and no longer leaves hung RunDLL windows.
+- Improved diagnostics and stability fixes.
 
 ## Data
 
@@ -47,9 +58,12 @@ All settings, profiles, and logs are stored under `Documents\TenzoraX\`.
 
 - Windows 10 or newer (64-bit)
 
-## Built with AI assistance
+## Contributors
 
-This hobby project was developed with AI-assisted programming. All code was reviewed, tested, and integrated by the developer.
+- [Arimtak](https://github.com/Arimtak) – creator and maintainer
+- Codebuff – AI pair programmer
+
+TenzoraX is developed with AI assistance. All changes are reviewed and tested by the maintainer.
 
 ## License
 

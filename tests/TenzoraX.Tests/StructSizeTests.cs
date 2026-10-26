@@ -11,14 +11,23 @@ namespace TenzoraX.Tests
     public class StructSizeTests
     {
         [Fact]
-        public void JoyCapsW_HasProvenLegacySize()
+        public void JoyCapsW_HasNativeSize()
         {
-            // 1:1 aus dem bisherigen, funktionsfähigen Code übernommen. Marshal.SizeOf
-            // liefert 388: die beiden ByValTStr-Arrays werden vom Marshaler auf
-            // 4 Bytes ausgerichtet (2 Byte Padding vor szRegKey). Da die Definition
-            // identisch zum Original ist, ist auch der an joyGetDevCapsW gemeldete
-            // cbjc-Wert identisch – genau das soll der Test garantieren.
-            Assert.Equal(388, Marshal.SizeOf<WinMMControllerProvider.JOYCAPSW>());
+            // joystickapi.h: 2 WORD + 32 WCHAR + 15 DWORD + 4 WORD + 32 WCHAR + 260 WCHAR.
+            // Windows vergleicht cbjc mit sizeof(JOYCAPS); jede Abweichung ergibt
+            // JOYERR_PARMS (165) und damit "kein Gamepad" für alle WinMM-Slots.
+            Assert.Equal(720, Marshal.SizeOf<WinMMControllerProvider.JOYCAPSW>());
+        }
+
+        [Fact]
+        public void JoyCapsW_InPipeline_HasSameNativeSize()
+        {
+            // Beide WinMM-Pfade (Detection + Live-Polling in ControllerManager) müssen
+            // dieselbe Strukturgröße an joyGetDevCapsW melden.
+            var managerField = typeof(TenzoraX.ControllerManager)
+                .GetNestedType("JOYCAPSW", System.Reflection.BindingFlags.NonPublic);
+            Assert.NotNull(managerField);
+            Assert.Equal(720, Marshal.SizeOf(managerField!));
         }
 
         [Fact]

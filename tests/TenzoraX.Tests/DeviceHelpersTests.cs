@@ -66,5 +66,41 @@ namespace TenzoraX.Tests
         {
             Assert.Equal(expected, DeviceHelpers.GetKnownVendorName(vid));
         }
+
+        [Theory]
+        [InlineData(0x045Eu, 0x02FFu, "Xbox-Controller")]            // Xbox One, USB
+        [InlineData(0x045Eu, 0x0B13u, "Xbox-Controller")]            // Bluetooth LE XInput
+        [InlineData(0x045Eu, 0x02E0u, "Xbox-Controller")]
+        [InlineData(0x045Eu, 0x028Eu, "Xbox 360 Controller")]
+        [InlineData(0x045Eu, 0x0719u, "Xbox 360 Controller")]
+        [InlineData(0x054Cu, 0x05C4u, "DualShock 4")]
+        [InlineData(0x054Cu, 0x09CCu, "DualShock 4")]               // DualShock 4 v2
+        [InlineData(0x054Cu, 0x0CE6u, "DualSense")]
+        [InlineData(0x054Cu, 0x0DF2u, "DualSense Edge")]
+        [InlineData(0x054Cu, 0x0268u, "DualShock 3")]
+        [InlineData(0x054Cu, 0x9999u, "PlayStation-Controller")]    // unbekannte Sony-PID
+        [InlineData(0x057Eu, 0x2009u, "Switch Pro Controller")]
+        [InlineData(0x057Eu, 0x2006u, "Joy-Con (links)")]
+        [InlineData(0x057Eu, 0x2007u, "Joy-Con (rechts)")]
+        [InlineData(0x057Eu, 0x1234u, "Nintendo-Controller")]       // unbekannte Nintendo-PID
+        [InlineData(0x2DC8u, 0x200Bu, "")]                          // 8BitDo: eigener Name
+        [InlineData(0x046Du, 0xC21Fu, "")]                          // Logitech: eigener Name
+        public void GetKnownControllerName_MapsKnownPads(ushort vid, ushort pid, string expected)
+        {
+            Assert.Equal(expected, DeviceHelpers.GetKnownControllerName(vid, pid));
+        }
+
+        [Theory]
+        [InlineData("XINPUT-kompatibles HID-Gerät", true)]
+        [InlineData("XINPUT compatible HID device", true)]
+        [InlineData("HID-compliant game controller", true)]
+        [InlineData("Wireless Controller", true)]                   // Sony-Default von Windows
+        [InlineData("", true)]
+        [InlineData("Xbox Elite Wireless Controller Series 2", false)]
+        [InlineData("8BitDo Ultimate 2C", false)]
+        public void IsDriverPlaceholderName_DetectsWindowsDriverNames(string text, bool expected)
+        {
+            Assert.Equal(expected, DeviceHelpers.IsDriverPlaceholderName(text));
+        }
     }
 }

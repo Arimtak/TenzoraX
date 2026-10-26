@@ -26,6 +26,73 @@
         <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource BorderColor}"/>
         <SolidColorBrush x:Key="ButtonHoverBrush" Color="{StaticResource ButtonHoverColor}"/>
 
+        <!-- ===================== Design-Flächen (Flat / 3D / Shine) =====================
+             Alle Flächen, Kanten und Schatten kommen aus diesen Schlüsseln. Theme3D
+             tauscht sie zur Laufzeit aus; die Werte hier sind die schlichte
+             Flat-Optik und gleichzeitig der Startzustand. Verbraucher MÜSSEN die
+             Schlüssel per DynamicResource lesen, sonst bleibt ein Wechsel wirkungslos. -->
+        <SolidColorBrush x:Key="SurfacePanelBrush" Color="#D916161E"/>
+        <SolidColorBrush x:Key="SurfaceCardBrush" Color="#0D0D12"/>
+        <SolidColorBrush x:Key="SurfaceListCardBrush" Color="#1A1A24"/>
+        <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#20202A"/>
+        <SolidColorBrush x:Key="SurfaceRaisedHoverBrush" Color="#2A2A38"/>
+        <SolidColorBrush x:Key="SurfacePressedBrush" Color="#00D2FF"/>
+        <SolidColorBrush x:Key="SurfaceSunkenBrush" Color="#1E1E26"/>
+        <SolidColorBrush x:Key="SurfaceAccentBrush" Color="#0F2C3A"/>
+        <SolidColorBrush x:Key="SurfaceAccentHoverBrush" Color="#14394A"/>
+        <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#0E2A35"/>
+        <SolidColorBrush x:Key="BevelEdgeBrush" Color="#2D2D3D"/>
+        <SolidColorBrush x:Key="BevelHoverBrush" Color="#475569"/>
+        <SolidColorBrush x:Key="BevelActiveBrush" Color="#00D2FF"/>
+        <SolidColorBrush x:Key="BevelInsetBrush" Color="#2D2D3D"/>
+        <SolidColorBrush x:Key="BevelInsetHoverBrush" Color="#475569"/>
+        <!-- Unsichtbar in Flat: gleiche Welt, nur ohne Tiefe. -->
+        <DropShadowEffect x:Key="PanelShadow" BlurRadius="0" ShadowDepth="0" Opacity="0"/>
+        <DropShadowEffect x:Key="RaisedShadow" BlurRadius="0" ShadowDepth="0" Opacity="0"/>
+
+        <!-- Panel-Fläche mit Tiefe: Der Schatten liegt auf einer eigenen Fläche
+             HINTER dem Inhalt – der Text wird dadurch nicht mitgerastert und bleibt
+             scharf. In Flat sind Schatten unsichtbar und die Flächen einfarbig,
+             also identisch zur bisherigen Optik. -->
+        <Style x:Key="Panel3DStyle" TargetType="ContentControl">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="VerticalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContentControl">
+                        <Grid>
+                            <Border CornerRadius="10" Background="{DynamicResource SurfacePanelBrush}" Effect="{DynamicResource PanelShadow}"/>
+                            <Border CornerRadius="10" Background="{DynamicResource SurfacePanelBrush}"
+                                    BorderBrush="{DynamicResource BevelEdgeBrush}" BorderThickness="1"/>
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Karte innerhalb einer Fläche (deckend, etwas schwächerer Schatten). -->
+        <Style x:Key="Card3DStyle" TargetType="ContentControl">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="VerticalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContentControl">
+                        <Grid>
+                            <Border CornerRadius="8" Background="{DynamicResource SurfaceCardBrush}" Effect="{DynamicResource RaisedShadow}"/>
+                            <Border CornerRadius="8" Background="{DynamicResource SurfaceCardBrush}"
+                                    BorderBrush="{DynamicResource BevelEdgeBrush}" BorderThickness="1"/>
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Custom Dark Scrollbar -->
         <Style x:Key="ScrollThumbs" TargetType="{x:Type Thumb}">
             <Setter Property="Template">
@@ -89,32 +156,39 @@
             </Setter>
         </Style>
 
-        <!-- Modern Flat Button Style -->
+        <!-- Modern Button Style (Fläche/Kante/Schatten aus dem Design) -->
         <Style TargetType="{x:Type Button}">
-            <Setter Property="Background" Value="#20202A"/>
+            <Setter Property="Background" Value="{DynamicResource SurfaceRaisedBrush}"/>
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BevelEdgeBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="10,5"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type Button}">
+                        <Grid>
+                            <!-- Schattenfläche: liegt exakt hinter dem Button und trägt nur den
+                                 Schatten. Sie übernimmt den Button-Hintergrund, damit
+                                 transparente Icon-Buttons (Background="Transparent") keine
+                                 sichtbare Platte bekommen – ohne Fläche gibt es keinen Schatten. -->
+                            <Border CornerRadius="6" Background="{TemplateBinding Background}" Effect="{DynamicResource RaisedShadow}"/>
                         <Border x:Name="border" CornerRadius="6" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" SnapsToDevicePixels="true">
                             <ContentPresenter x:Name="contentPresenter" Focusable="false" HorizontalAlignment="Center" Margin="{TemplateBinding Padding}" RecognizesAccessKey="True" SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" VerticalAlignment="Center"/>
                         </Border>
+                        </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsDefaulted" Value="true">
-                                <Setter Property="BorderBrush" TargetName="border" Value="{StaticResource AccentBrush}"/>
+                                <Setter Property="BorderBrush" TargetName="border" Value="{DynamicResource BevelActiveBrush}"/>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="true">
-                                <Setter Property="Background" TargetName="border" Value="{StaticResource ButtonHoverBrush}"/>
-                                <Setter Property="BorderBrush" TargetName="border" Value="#475569"/>
+                                <Setter Property="Background" TargetName="border" Value="{DynamicResource SurfaceRaisedHoverBrush}"/>
+                                <Setter Property="BorderBrush" TargetName="border" Value="{DynamicResource BevelHoverBrush}"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="true">
-                                <Setter Property="Background" TargetName="border" Value="#00D2FF"/>
+                                <Setter Property="Background" TargetName="border" Value="{DynamicResource SurfacePressedBrush}"/>
                                 <Setter Property="TextElement.Foreground" TargetName="contentPresenter" Value="#000000"/>
-                                <Setter Property="BorderBrush" TargetName="border" Value="#00D2FF"/>
+                                <Setter Property="BorderBrush" TargetName="border" Value="{DynamicResource BevelActiveBrush}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="false">
                                 <Setter Property="Background" TargetName="border" Value="#0D0D11"/>
@@ -139,7 +213,7 @@
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <Border x:Name="themeBorder" CornerRadius="4" Background="#1E1E26" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" HorizontalAlignment="Left" VerticalAlignment="Center" Width="18" Height="18" Margin="0,0,8,0">
+                            <Border x:Name="themeBorder" CornerRadius="4" Background="{DynamicResource SurfaceSunkenBrush}" BorderBrush="{DynamicResource BevelInsetBrush}" BorderThickness="1" HorizontalAlignment="Left" VerticalAlignment="Center" Width="18" Height="18" Margin="0,0,8,0">
                                 <Grid x:Name="markGrid">
                                     <Path x:Name="optionMark" Data="F1 M 9.97498,2.99999 L 3.99999,8.99999 L 1.025,6.025 L 0,7.05 L 3.99999,11 L 11,3.99999 L 9.97498,2.99999 Z" Fill="{StaticResource AccentBrush}" Margin="3" Opacity="0" Stretch="Uniform"/>
                                 </Grid>
@@ -148,11 +222,11 @@
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="true">
-                                <Setter Property="BorderBrush" TargetName="themeBorder" Value="#475569"/>
+                                <Setter Property="BorderBrush" TargetName="themeBorder" Value="{DynamicResource BevelInsetHoverBrush}"/>
                             </Trigger>
                             <Trigger Property="IsChecked" Value="true">
                                 <Setter Property="Opacity" TargetName="optionMark" Value="1"/>
-                                <Setter Property="BorderBrush" TargetName="themeBorder" Value="{StaticResource AccentBrush}"/>
+                                <Setter Property="BorderBrush" TargetName="themeBorder" Value="{DynamicResource BevelActiveBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -162,9 +236,9 @@
 
         <!-- Modern ComboBox Style -->
         <Style TargetType="{x:Type ComboBox}">
-            <Setter Property="Background" Value="{StaticResource PanelBgBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}"/>
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BevelInsetBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="8,4"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
@@ -179,12 +253,22 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <!-- Vollflächiger ToggleButton (Grid.ColumnSpan=2): Klick auf
-                                     den Namen ODER auf den Pfeil öffnet die Liste. -->
-                                <ToggleButton x:Name="PART_ToggleButton" Grid.ColumnSpan="2" Background="Transparent" BorderThickness="0" Cursor="Hand" Focusable="False" IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"/>
-                                <ContentPresenter x:Name="contentPresenter" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" IsHitTestVisible="False" Margin="{TemplateBinding Padding}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                                     den Namen ODER auf den Pfeil öffnet die Liste.
+                                     WICHTIG: eigener, leerer Template. Der geerbte
+                                     ToggleButton-Stil zeichnete sonst seine helle
+                                     Standardfläche ÜBER den dunklen Hintergrund –
+                                     die Beschriftung wurde dadurch unlesbar. -->
+                                <ToggleButton x:Name="PART_ToggleButton" Grid.ColumnSpan="2" Cursor="Hand" Focusable="False" IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                    <ToggleButton.Template>
+                                        <ControlTemplate TargetType="{x:Type ToggleButton}">
+                                            <Border Background="Transparent"/>
+                                        </ControlTemplate>
+                                    </ToggleButton.Template>
+                                </ToggleButton>
+                                <ContentPresenter x:Name="contentPresenter" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" TextElement.Foreground="{TemplateBinding Foreground}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" IsHitTestVisible="False" Margin="{TemplateBinding Padding}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
                                 <TextBlock Grid.Column="1" Text="▼" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" FontSize="8" Margin="0,0,8,0" IsHitTestVisible="False"/>
                                 <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" Placement="Bottom" Grid.ColumnSpan="2" Margin="0,1,0,0">
-                                    <Border x:Name="DropDownBorder" Background="#16161E" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4" MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <Border x:Name="DropDownBorder" Background="{DynamicResource SurfaceCardBrush}" BorderBrush="{DynamicResource BevelEdgeBrush}" BorderThickness="1" CornerRadius="4" Effect="{DynamicResource RaisedShadow}" MaxHeight="{TemplateBinding MaxDropDownHeight}">
                                         <ScrollViewer>
                                             <ItemsPresenter x:Name="ItemsPresenter" KeyboardNavigation.DirectionalNavigation="Contained"/>
                                         </ScrollViewer>
@@ -194,7 +278,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="BorderBrush" TargetName="MainBorder" Value="#475569"/>
+                                <Setter Property="BorderBrush" TargetName="MainBorder" Value="{DynamicResource BevelInsetHoverBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -215,10 +299,10 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="true">
-                                <Setter Property="Background" TargetName="Bd" Value="#2A2A38"/>
+                                <Setter Property="Background" TargetName="Bd" Value="{DynamicResource SurfaceRaisedHoverBrush}"/>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="true">
-                                <Setter Property="Background" TargetName="Bd" Value="#0E2A35"/>
+                                <Setter Property="Background" TargetName="Bd" Value="{DynamicResource SurfaceSelectedBrush}"/>
                                 <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -229,9 +313,9 @@
 
         <!-- Dark TextBox Style -->
         <Style TargetType="{x:Type TextBox}">
-            <Setter Property="Background" Value="#1E1E26"/>
+            <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}"/>
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BevelInsetBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="6,3"/>
             <Setter Property="CaretBrush" Value="{StaticResource AccentBrush}"/>
@@ -244,10 +328,10 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="true">
-                                <Setter Property="BorderBrush" TargetName="border" Value="#475569"/>
+                                <Setter Property="BorderBrush" TargetName="border" Value="{DynamicResource BevelInsetHoverBrush}"/>
                             </Trigger>
                             <Trigger Property="IsFocused" Value="true">
-                                <Setter Property="BorderBrush" TargetName="border" Value="{StaticResource AccentBrush}"/>
+                                <Setter Property="BorderBrush" TargetName="border" Value="{DynamicResource BevelActiveBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -277,10 +361,10 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="true">
-                                <Setter Property="Background" TargetName="Bd" Value="#2A2A38"/>
+                                <Setter Property="Background" TargetName="Bd" Value="{DynamicResource SurfaceRaisedHoverBrush}"/>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="true">
-                                <Setter Property="Background" TargetName="Bd" Value="#0E2A35"/>
+                                <Setter Property="Background" TargetName="Bd" Value="{DynamicResource SurfaceSelectedBrush}"/>
                                 <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -309,7 +393,7 @@
                                     <RepeatButton Style="{x:Null}" Command="{x:Static Slider.DecreaseLarge}" Background="{StaticResource AccentBrush}" Focusable="False"/>
                                 </Track.DecreaseRepeatButton>
                                 <Track.IncreaseRepeatButton>
-                                    <RepeatButton Style="{x:Null}" Command="{x:Static Slider.IncreaseLarge}" Background="#2D2D3A" Focusable="False"/>
+                                    <RepeatButton Style="{x:Null}" Command="{x:Static Slider.IncreaseLarge}" Background="{DynamicResource SurfaceSunkenBrush}" Focusable="False"/>
                                 </Track.IncreaseRepeatButton>
                                 <Track.Thumb>
                                     <Thumb x:Name="Thumb" Background="{StaticResource AccentBrush}" BorderBrush="{StaticResource AccentBrush}" BorderThickness="0" Width="12" Height="12" Focusable="False"/>
@@ -333,17 +417,18 @@
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <Border x:Name="radioBorder" CornerRadius="9" Width="18" Height="18" BorderThickness="1" BorderBrush="{StaticResource BorderBrush}" Background="#1E1E26" Margin="0,0,8,0">
+                            <Border x:Name="radioBorder" CornerRadius="9" Width="18" Height="18" BorderThickness="1" BorderBrush="{DynamicResource BevelInsetBrush}" Background="{DynamicResource SurfaceSunkenBrush}" Margin="0,0,8,0">
                                 <Ellipse x:Name="radioMark" Fill="{StaticResource AccentBrush}" Margin="4" Opacity="0"/>
                             </Border>
                             <ContentPresenter Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Center"/>
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="true">
-                                <Setter Property="BorderBrush" TargetName="radioBorder" Value="#475569"/>
+                                <Setter Property="BorderBrush" TargetName="radioBorder" Value="{DynamicResource BevelInsetHoverBrush}"/>
                             </Trigger>
                             <Trigger Property="IsChecked" Value="true">
                                 <Setter Property="Opacity" TargetName="radioMark" Value="1"/>
+                                <Setter Property="BorderBrush" TargetName="radioBorder" Value="{DynamicResource BevelActiveBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>

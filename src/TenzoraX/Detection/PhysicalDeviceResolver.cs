@@ -288,6 +288,14 @@ namespace TenzoraX.Detection
         [DllImport("cfgmgr32.dll")]
         private static extern uint CM_Get_DevNode_Status(out uint status, out uint problemNumber, uint devInst, uint flags);
 
+        [DllImport("setupapi.dll", SetLastError = true)]
+        private static extern IntPtr SetupDiCreateDeviceInfoList(IntPtr classGuid, IntPtr hwndParent);
+
+        // CharSet.Auto ist auch hier nötig, sonst sucht der Loader die nicht existierende
+        // Funktion "…A" (EntryPointNotFoundException).
+        [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern bool SetupDiOpenDeviceInfo(IntPtr deviceInfoSet, string deviceInstanceId, IntPtr hwndParent, uint openFlags, ref SP_DEVINFO_DATA deviceInfoData);
+
         /// <summary>
         /// Anzahl der Geräte, deren Daten beim letzten Durchlauf nicht gelesen werden
         /// konnten. Wird für die Diagnose gemeldet, statt Fehler stillschweigend zu
@@ -396,16 +404,20 @@ namespace TenzoraX.Detection
         /// im Windows-Panel und damit auch bei Steam; sichtbar sind sie nur hier.
         ///
         /// Bewusst OHNE DIGCF_PRESENT: sonst liefert Windows nur die laufenden Geräte.
+        /// <param name="presentOnly">true = nur angeschlossene Knoten (deaktivierte sind
+        /// weiterhin „vorhanden“). Für die Kennzeichnung in der Controller-Liste reicht das
+        /// und ist deutlich billiger als alle je installierten Geräte einzusammeln.</param>
         /// </summary>
-        public static List<DeviceStateInfo> EnumerateDeviceStates()
+        public static List<DeviceStateInfo> EnumerateDeviceStates(bool presentOnly = false)
         {
             var result = new List<DeviceStateInfo>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            uint flags = presentOnly ? DIGCF_ALLCLASSES | DIGCF_PRESENT : DIGCF_ALLCLASSES;
 
             foreach (var enumerator in Enumerators)
             {
                 IntPtr set;
-                try { set = SetupDiGetClassDevsByEnumerator(IntPtr.Zero, enumerator, IntPtr.Zero, DIGCF_ALLCLASSES); }
+                try { set = SetupDiGetClassDevsByEnumerator(IntPtr.Zero, enumerator, IntPtr.Zero, flags); }
                 catch { continue; }
                 if (set == IntPtr.Zero || set == new IntPtr(-1)) continue;
 
@@ -445,6 +457,174 @@ namespace TenzoraX.Detection
             return result;
         }
 
+        private static readonly List<DeviceStateInfo> DisabledListCache = new();
+        private static DateTime DisabledListCacheAt = DateTime.MinValue;
+        private static readonly object DisabledKeysCacheLock = new();
+        private static readonly TimeSpan DisabledKeysCacheMaxAge = TimeSpan.FromSeconds(5);
+
+        /// <summary>
+        /// Zustand genau einer Instanz: true, wenn Windows sie gerade führt (Started).
+        /// Wird nach dem Aktivieren einer Schnittstelle als Erfolgsmaßstab benutzt.
+        /// </summary>
+        public static bool IsInterfaceStarted(string? instanceId)
+        {
+            string key = DeviceHelpers.NormalizeInstanceKey(instanceId);
+            if (key == "") return false;
+
+            try
+            {
+                foreach (var state in EnumerateDeviceStates(presentOnly: true))
+                {
+                    if (DeviceHelpers.NormalizeInstanceKey(state.InstanceId) != key) continue;
+                    return state.State == DeviceState.Started;
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        /// <summary>Verwirft die gecachten Gerätezustände (nach einer Aktivierung nötig).</summary>
+        public static void InvalidateDeviceCaches()
+        {
+            lock (DisabledKeysCacheLock)
+            {
+                DisabledListCache.Clear();
+                DisabledListCacheAt = DateTime.MinValue;
+            }
+        }
+
+        /// <summary>
+        /// Angeschlossene, aber in Windows deaktivierte Geräte der Controller-Bustreiber
+        /// (Problemcode 22), 5 s gecacht. Die Namen werden mitgeliefert, damit die
+        /// Oberfläche die richtige Schnittstelle benennen und gezielt einschalten kann.
+        /// </summary>
+        public static List<DeviceStateInfo> DisabledInterfaces()
+        {
+            lock (DisabledKeysCacheLock)
+            {
+                if (DateTime.UtcNow - DisabledListCacheAt < DisabledKeysCacheMaxAge)
+                    return new List<DeviceStateInfo>(DisabledListCache);
+            }
+
+            var list = new List<DeviceStateInfo>();
+            try
+            {
+                foreach (var state in EnumerateDeviceStates(presentOnly: true))
+                {
+                    if (state.State != DeviceState.Disabled) continue;
+                    if (string.IsNullOrEmpty(state.InstanceId)) continue;
+                    list.Add(state);
+                }
+            }
+            catch { }
+
+            lock (DisabledKeysCacheLock)
+            {
+                DisabledListCache.Clear();
+                DisabledListCache.AddRange(list);
+                DisabledListCacheAt = DateTime.UtcNow;
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// Kanonische Instanz-Schlüssel der angeschlossenen, aber in Windows deaktivierten
+        /// Geräte (Problemcode 22). Solche Schnittstellen liefern keine Eingaben und fehlen
+        /// im Windows-Panel und bei Steam – die App listet sie aber trotzdem, weil die
+        /// SetupAPI sie als „vorhanden“ meldet. Gecacht, weil der Rescan alle 300 ms läuft.
+        /// </summary>
+        public static HashSet<string> DisabledInterfaceKeys()
+        {
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var state in DisabledInterfaces())
+            {
+                string key = DeviceHelpers.NormalizeInstanceKey(state.InstanceId);
+                if (key != "") keys.Add(key);
+            }
+            return keys;
+        }
+
+        private static readonly Dictionary<string, string> ProductNameCache = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly object ProductNameCacheLock = new();
+
+        /// <summary>
+        /// Echter Produktname der physischen Instanz – für Geräte, die selbst keinen
+        /// Namen liefern (Raw Input). Gelesen wird FriendlyName, sonst DeviceDesc; steht
+        /// dort nur ein Treiber-Platzhalter („XINPUT-kompatibles HID-Gerät“), geht die
+        /// Suche bis zu drei Ebenen nach oben – der Elternknoten ist das eigentliche Pad.
+        /// Das Ergebnis wird zwischengespeichert, weil die Zusatz-Erkennung alle 300 ms läuft.
+        /// </summary>
+        public static string ResolveProductName(string? instanceId, ushort vid, ushort pid)
+        {
+            if (string.IsNullOrWhiteSpace(instanceId)) return "";
+            string key = instanceId.Trim();
+
+            lock (ProductNameCacheLock)
+            {
+                if (ProductNameCache.TryGetValue(key, out string? cached)) return cached;
+            }
+
+            string result = "";
+            IntPtr set = IntPtr.Zero;
+            try
+            {
+                set = SetupDiCreateDeviceInfoList(IntPtr.Zero, IntPtr.Zero);
+                if (set != IntPtr.Zero && set != new IntPtr(-1))
+                {
+                    var data = new SP_DEVINFO_DATA { cbSize = (uint)Marshal.SizeOf<SP_DEVINFO_DATA>() };
+                    if (SetupDiOpenDeviceInfo(set, key, IntPtr.Zero, 0, ref data))
+                    {
+                        string ownFriendly = ReadRegistryString(set, ref data, SPDRP_FRIENDLYNAME);
+                        string ownDesc = ReadRegistryString(set, ref data, SPDRP_DEVICEDESC);
+
+                        var ancestors = new List<(string Friendly, string Desc)>();
+                        string parent = ReadParentInstanceId(set, ref data);
+                        for (int depth = 0; depth < 3 && !string.IsNullOrEmpty(parent); depth++)
+                        {
+                            // Nur Knoten desselben Geräts (gleiche VID/PID): HID-Sammlung →
+                            // Schnittstelle → Verbundgerät. Darüber hinaus folgen fremde Geräte
+                            // (Hub, Root-Hub) – deren Namen gehören nicht zum Controller.
+                            if (!DeviceHelpers.TryParseVidPid(parent, out ushort parentVid, out ushort parentPid) ||
+                                parentVid != vid || parentPid != pid)
+                                break;
+
+                            var parentData = new SP_DEVINFO_DATA { cbSize = (uint)Marshal.SizeOf<SP_DEVINFO_DATA>() };
+                            if (!SetupDiOpenDeviceInfo(set, parent, IntPtr.Zero, 0, ref parentData)) break;
+                            ancestors.Add((ReadRegistryString(set, ref parentData, SPDRP_FRIENDLYNAME),
+                                           ReadRegistryString(set, ref parentData, SPDRP_DEVICEDESC)));
+                            parent = ReadParentInstanceId(set, ref parentData);
+                        }
+
+                        result = DeviceNameResolver.PickProductName(ownFriendly, ownDesc, ancestors, vid, pid);
+                    }
+                    else
+                    {
+                        App.LogApp("Namensauflösung: Gerät nicht lesbar: " + key);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                App.LogApp("Namensauflösung fehlgeschlagen (" + key + "): " + ex.Message);
+            }
+            finally
+            {
+                if (set != IntPtr.Zero && set != new IntPtr(-1))
+                {
+                    try { SetupDiDestroyDeviceInfoList(set); } catch { }
+                }
+            }
+
+            lock (ProductNameCacheLock)
+            {
+                ProductNameCache[key] = result;
+            }
+            return result;
+        }
+
+        private const uint SPDRP_DEVICEDESC = 0x00000000;
+        private const uint SPDRP_FRIENDLYNAME = 0x0000000C;
+
         /// <summary>
         /// Anzeigename eines Knotens: bevorzugt der freundliche Name (so wie ihn der
         /// Geräte-Manager zeigt, z. B. „HID-konformes Benutzersteuergerät“), sonst die
@@ -455,9 +635,6 @@ namespace TenzoraX.Detection
         /// </summary>
         private static string ReadFriendlyName(IntPtr set, ref SP_DEVINFO_DATA data)
         {
-            const uint SPDRP_DEVICEDESC = 0x00000000;
-            const uint SPDRP_FRIENDLYNAME = 0x0000000C;
-
             string name = ReadRegistryString(set, ref data, SPDRP_FRIENDLYNAME);
             if (string.IsNullOrEmpty(name)) name = ReadRegistryString(set, ref data, SPDRP_DEVICEDESC);
             return name;

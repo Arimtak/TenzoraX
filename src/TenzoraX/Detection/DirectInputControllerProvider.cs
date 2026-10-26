@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace TenzoraX.Detection
@@ -13,6 +14,7 @@ namespace TenzoraX.Detection
     {
         private const uint DIRECTINPUT_VERSION = 0x0800;
         internal const uint DI8DEVCLASS_GAMECTRL = 4;
+        private const uint DI8DEVCLASS_ALL = 0;
         private const uint DIEDFL_ATTACHEDONLY = 0x00000001;
 
         // DI8DEVTYPE-Werte (niedriges Byte von dwDevType)
@@ -20,6 +22,109 @@ namespace TenzoraX.Detection
         internal const byte DI8DEVTYPE_GAMEPAD = 0x15;
 
         private static readonly Guid IID_IDirectInput8W = new("BF798031-483A-4DA2-AA99-5D64ED369700");
+
+        // ============================================================
+        //  Gemeinsame Sperre mit dem Windows-Panel (joy.cpl)
+        // ============================================================
+        // joy.cpl zählt über dieselbe DirectInput/HID-Schnittstelle auf. Läuft unsere
+        // Aufzählung gleichzeitig mit dem Panel, kann ein hängender HID-Treiber
+        // rundll32 zum Absturz bringen („RunDLL“, gemessen 26.10.2026). Deshalb:
+        //  - Enumerate/FindSlowDevices laufen nie, während das Panel startet oder offen ist.
+        //  - Das Panel startet nur, wenn keine Aufzählung mehr läuft und die letzte
+        //    nicht im Stau endete (sonst würde joy.cpl sicher hängen).
+        private static readonly object PanelGate = new();
+        private static int _activeCalls;
+        private static bool _panelExclusive;
+        private static long _lastCallMs;
+        private static DateTime _lastCallEndedUtc = DateTime.MinValue;
+
+        // Zuletzt gemessene Geräte, deren Capabilities-Abfrage in einen Timeout lief.
+        // Die Liste bleibt stehen, bis wieder eines gefunden wird: Der Reparaturlauf
+        // startet kurz nach der Messung, und die nächste (schnelle) Aufzählung darf sie
+        // ihm nicht unter den Füßen wegziehen.
+        private static volatile string[] _lastSlowDevices = Array.Empty<string>();
+
+        /// <summary>Geräte (VID/PID) mit zuletzt gemessenem 10-s-Timeout, leer wenn keins.</summary>
+        public static IReadOnlyList<string> LastSlowDevices => _lastSlowDevices;
+
+        /// <summary>Ab dieser Dauer gilt eine Aufzählung als Stau (HID-Timeouts).</summary>
+        internal const long SlowCallMs = 5000;
+
+        /// <summary>So lange nach einem Stau wird das Panel nicht geöffnet.</summary>
+        internal const long SlowCallWindowMs = 180000;
+
+        /// <summary>
+        /// True, wenn die letzte Aufzählung im Stau endete und das noch frisch ist:
+        /// Der Stau liegt dann meist noch an, und joy.cpl würde daran abstürzen.
+        /// Rein und damit testbar.
+        /// </summary>
+        public static bool ShouldRefuseForStall(long lastCallMs, double msSinceLastCall,
+            long slowThresholdMs = SlowCallMs, long windowMs = SlowCallWindowMs)
+        {
+            return lastCallMs >= slowThresholdMs && msSinceLastCall >= 0 && msSinceLastCall <= windowMs;
+        }
+
+        /// <summary>
+        /// Meldet eine Aufzählung an. False, solange das Panel die Schnittstelle für sich
+        /// beansprucht – dann wird in diesem Zyklus gar nicht erst aufgezählt.
+        /// </summary>
+        private static bool EnterCall()
+        {
+            lock (PanelGate)
+            {
+                if (_panelExclusive) return false;
+                _activeCalls++;
+                return true;
+            }
+        }
+
+        private static void ExitCall(Stopwatch watch)
+        {
+            watch.Stop();
+            lock (PanelGate)
+            {
+                _lastCallMs = watch.ElapsedMilliseconds;
+                _lastCallEndedUtc = DateTime.UtcNow;
+                _activeCalls--;
+                Monitor.PulseAll(PanelGate);
+            }
+        }
+
+        /// <summary>
+        /// Fordert die Schnittstelle für das Öffnen von joy.cpl an: wartet, bis keine
+        /// Aufzählung mehr läuft, und sperrt neue. False, wenn nach dem Timeout noch eine
+        /// Aufzählung hängt oder die letzte im Stau endete – dann darf das Panel nicht
+        /// starten, weil Windows es als RunDLL zum Absturz bringt.
+        /// </summary>
+        public static bool TryBeginPanelExclusive(int timeoutMs)
+        {
+            var watch = Stopwatch.StartNew();
+            lock (PanelGate)
+            {
+                while (_activeCalls > 0)
+                {
+                    int remaining = timeoutMs - (int)watch.ElapsedMilliseconds;
+                    if (remaining <= 0) return false;
+                    Monitor.Wait(PanelGate, remaining);
+                }
+
+                double sinceLast = (DateTime.UtcNow - _lastCallEndedUtc).TotalMilliseconds;
+                if (ShouldRefuseForStall(_lastCallMs, sinceLast)) return false;
+
+                _panelExclusive = true;
+                return true;
+            }
+        }
+
+        /// <summary>Gibt die Schnittstelle nach dem Panel-Start wieder frei.</summary>
+        public static void EndPanelExclusive()
+        {
+            lock (PanelGate)
+            {
+                _panelExclusive = false;
+                Monitor.PulseAll(PanelGate);
+            }
+        }
 
         public string ApiName => "DirectInput";
 
@@ -31,22 +136,32 @@ namespace TenzoraX.Detection
         public static List<DetectedDeviceInfo> Enumerate(bool verboseLogging = true)
         {
             var result = new List<DetectedDeviceInfo>();
+            if (!EnterCall()) return result;
+
+            var callWatch = Stopwatch.StartNew();
             IntPtr dinputPtr = IntPtr.Zero;
             object? dinputCom = null;
+            EnumState? enumState = null;
+            long createMs = 0, comMs = 0, enumMs = 0;
+            var phaseWatch = new Stopwatch();
             try
             {
                 Guid iid = IID_IDirectInput8W;   // lokale Kopie (ref-Parameter)
                 // GetModuleHandle(null): echtes EXE-Modul-Handle. Marshal.GetHINSTANCE
                 // liefert in Single-File-Bundles -1 → DirectInput8Create: E_INVALIDARG.
+                phaseWatch.Restart();
                 int hr = DirectInput8Create(
                     GetModuleHandle(null),
                     DIRECTINPUT_VERSION, ref iid, out dinputPtr, IntPtr.Zero);
+                createMs = phaseWatch.ElapsedMilliseconds;
                 if (hr != 0 || dinputPtr == IntPtr.Zero)
                 {
                     App.LogApp("DirectInput: DirectInput8Create fehlgeschlagen (hr=0x" + hr.ToString("X8") + ")");
                     return result;
                 }
+                phaseWatch.Restart();
                 dinputCom = Marshal.GetObjectForIUnknown(dinputPtr);
+                comMs = phaseWatch.ElapsedMilliseconds;
                 if (dinputCom is not IDirectInput8W dinput)
                 {
                     App.LogApp("DirectInput: IDirectInput8W-Interface nicht verfügbar");
@@ -55,6 +170,7 @@ namespace TenzoraX.Detection
 
                 var callback = new EnumDevCallback(OnEnumDevice);
                 var state = new EnumState(result, dinput, verboseLogging);
+                enumState = state;
                 var stateHandle = GCHandle.Alloc(state);
                 try
                 {
@@ -62,9 +178,12 @@ namespace TenzoraX.Detection
                     // (direkte Delegate-Parameter werden von .NET nicht als solche
                     // gemarshallt → "_Delegate-Interface"-Fehler).
                     IntPtr fnPtr = Marshal.GetFunctionPointerForDelegate(callback);
+                    phaseWatch.Restart();
                     dinput.EnumDevices(DI8DEVCLASS_GAMECTRL, fnPtr, (IntPtr)stateHandle, DIEDFL_ATTACHEDONLY);
+                    enumMs = phaseWatch.ElapsedMilliseconds;
                 }
                 finally { stateHandle.Free(); GC.KeepAlive(callback); }
+
                 if (verboseLogging)
                     App.LogApp("DI-Enumeration: " + result.Count + " DirectInput-Gamepads gefunden");
             }
@@ -78,8 +197,121 @@ namespace TenzoraX.Detection
                 {
                     try { Marshal.FinalReleaseComObject(dinputCom); } catch { }
                 }
+
+                // Ein 10-s-Timeout steckt häufig nicht zwischen den Rückrufen, sondern
+                // in CreateDevice/GetCapabilities eines einzelnen Geräts (gemessen
+                // 26.10.2026: Aufzählung 10,4 s, aber kein Lückenwert über 2 s).
+                if (enumState != null && enumState.SlowVidPids.Count > 0)
+                    _lastSlowDevices = enumState.SlowVidPids.ToArray();
+
+                if (callWatch.ElapsedMilliseconds > 2000)
+                    App.LogApp("DI-Phasen: Create=" + createMs + " ms, COM=" + comMs +
+                               " ms, EnumDevices=" + enumMs + " ms, gesamt=" + callWatch.ElapsedMilliseconds + " ms");
+
+                ExitCall(callWatch);
             }
             return result;
+        }
+
+        /// <summary>
+        /// Sucht Geräte, die die DirectInput-Aufzählung blockieren. Dafür wird einmal
+        /// über ALLE Geräteklassen aufgezählt und die Zeit zwischen zwei Rückrufen
+        /// gemessen; alles ab <paramref name="thresholdMs"/> gilt als Stau.
+        ///
+        /// Nötig, weil die normale Gamepad-Aufzählung zwar dieselbe Verzögerung hat,
+        /// die blockierenden Tastatur-/Receiver-Sammlungen aber nicht in ihrer Liste
+        /// auftauchen. Der Aufruf kann selbst so lange dauern wie der Stau – deshalb
+        /// nur im Hintergrund nach einer bereits gemessenen Verzögerung aufrufen.
+        /// </summary>
+        public static List<string> FindSlowDevices(int thresholdMs = 2000)
+        {
+            var result = new List<string>();
+            if (!EnterCall()) return result;
+
+            var callWatch = Stopwatch.StartNew();
+            IntPtr dinputPtr = IntPtr.Zero;
+            object? dinputCom = null;
+            try
+            {
+                Guid iid = IID_IDirectInput8W;
+                int hr = DirectInput8Create(GetModuleHandle(null), DIRECTINPUT_VERSION, ref iid, out dinputPtr, IntPtr.Zero);
+                if (hr != 0 || dinputPtr == IntPtr.Zero)
+                {
+                    App.LogApp("DI-Stau: DirectInput8Create fehlgeschlagen (hr=0x" + hr.ToString("X8") + ")");
+                    return result;
+                }
+
+                dinputCom = Marshal.GetObjectForIUnknown(dinputPtr);
+                if (dinputCom is not IDirectInput8W dinput)
+                {
+                    App.LogApp("DI-Stau: IDirectInput8W-Interface nicht verfügbar");
+                    return result;
+                }
+
+                var callback = new EnumDevCallback(OnSlowProbeDevice);
+                var state = new SlowProbeState(thresholdMs);
+                var stateHandle = GCHandle.Alloc(state);
+                try
+                {
+                    IntPtr fnPtr = Marshal.GetFunctionPointerForDelegate(callback);
+                    dinput.EnumDevices(DI8DEVCLASS_ALL, fnPtr, (IntPtr)stateHandle, DIEDFL_ATTACHEDONLY);
+                }
+                finally { stateHandle.Free(); GC.KeepAlive(callback); }
+
+                result.AddRange(state.SlowVidPids);
+                App.LogApp(result.Count == 0
+                    ? "DI-Stau: kein einzelnes Gerät über " + thresholdMs + " ms gefunden."
+                    : "DI-Stau: blockierende Geräte: " + string.Join(", ", result));
+            }
+            catch (Exception ex)
+            {
+                App.LogApp("DI-Stau: Messung fehlgeschlagen: " + ex.GetType().Name + ": " + ex.Message);
+            }
+            finally
+            {
+                if (dinputCom != null)
+                {
+                    try { Marshal.FinalReleaseComObject(dinputCom); } catch { }
+                }
+                ExitCall(callWatch);
+            }
+            return result;
+        }
+
+        private sealed class SlowProbeState
+        {
+            public readonly int ThresholdMs;
+            public readonly Stopwatch Gap = Stopwatch.StartNew();
+            public readonly List<string> SlowVidPids = new();
+            public readonly HashSet<string> Seen = new(StringComparer.OrdinalIgnoreCase);
+
+            public SlowProbeState(int thresholdMs) { ThresholdMs = thresholdMs; }
+        }
+
+        private static int OnSlowProbeDevice(ref DIDEVICEINSTANCEW lpddi, IntPtr pvRef)
+        {
+            try
+            {
+                if (((GCHandle)pvRef).Target is not SlowProbeState state) return 0;
+
+                long gap = state.Gap.ElapsedMilliseconds;
+                state.Gap.Restart();
+                if (gap < state.ThresholdMs) return 1;
+
+                uint data1 = BitConverter.ToUInt32(lpddi.guidProduct.ToByteArray(), 0);
+                ushort vid = (ushort)(data1 & 0xFFFF);
+                ushort pid = (ushort)((data1 >> 16) & 0xFFFF);
+                if (vid == 0 && pid == 0) return 1;
+
+                string vidPid = DeviceHelpers.FormatVidPid(vid, pid);
+                if (state.Seen.Add(vidPid))
+                {
+                    state.SlowVidPids.Add(vidPid);
+                    App.LogApp("DI-Stau: " + vidPid + " '" + lpddi.tszProductName + "' blockierte " + gap + " ms.");
+                }
+            }
+            catch { }
+            return 1;
         }
 
         private sealed class EnumState
@@ -87,6 +319,8 @@ namespace TenzoraX.Detection
             public readonly List<DetectedDeviceInfo> Result;
             public readonly IDirectInput8W Dinput;
             public readonly bool Verbose;
+            public readonly List<string> SlowVidPids = new();
+            public readonly HashSet<string> SeenSlow = new(StringComparer.OrdinalIgnoreCase);
             public EnumState(List<DetectedDeviceInfo> result, IDirectInput8W dinput, bool verbose)
             {
                 Result = result;
@@ -136,7 +370,19 @@ namespace TenzoraX.Detection
                     Usage = lpddi.wUsage
                 };
 
+                var capsWatch = Stopwatch.StartNew();
                 FillCapabilities(state.Dinput, ref lpddi.guidInstance, info, state.Verbose);
+                capsWatch.Stop();
+
+                // Ab 2 s ist es kein normaler Zugriff mehr, sondern ein HID-Timeout
+                // (die Funk-Receiver brauchen exakt 10 s, wenn sie eingeschlafen sind).
+                if (capsWatch.ElapsedMilliseconds >= 2000 && info.VidPid != "" && state.SeenSlow.Add(info.VidPid))
+                {
+                    state.SlowVidPids.Add(info.VidPid);
+                    App.LogApp("DI-Stau: " + info.VidPid + " '" + info.Name + "' brauchte " +
+                               capsWatch.ElapsedMilliseconds + " ms für Capabilities.");
+                }
+
                 if (state.Verbose)
                     App.LogApp("DI-Caps: '" + info.Name + "' Axes=" + info.Axes + " Buttons=" + info.Buttons + " POVs=" + info.Povs);
 

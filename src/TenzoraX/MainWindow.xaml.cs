@@ -72,11 +72,12 @@ namespace TenzoraX
         /// <summary>Auto-Wiederauswahl des Controllers: "first" (erster verbundener) oder "last" (zuletzt verwendeter, StableId).</summary>
         public string ControllerReselectMode { get; set; } = "first";
 
-        public bool BatteryEnabled { get; set; } = false;
-        public double BatteryHours { get; set; } = 15;
-        public double BatteryActiveMinutes { get; set; } = 0;
-        public bool BatteryTrayEnabled { get; set; } = true;
-        public bool BatteryAnimationEnabled { get; set; } = true;
+        /// <summary>Oberflächen-Stil: "flat" (flach), "3d" (Licht, Kanten, Tiefe) oder "shine" (3D mit Glanzkante).</summary>
+        public string UiTheme { get; set; } = Theme3D.ThreeD;
+
+        /// <summary>Ob der Controller-Bereich eingeklappt ist, damit die Tastatur den Platz bekommt.</summary>
+        public bool GamepadCollapsed { get; set; } = false;
+
         /// <summary>Ob der animierte GhostFibers-Hintergrund läuft (GPU-Pixel-Shader).</summary>
         public bool AnimatedBackgroundEnabled { get; set; } = true;
         /// <summary>
@@ -128,7 +129,14 @@ namespace TenzoraX
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
         private NotifyIcon? _notifyIcon;
+        /// <summary>Gecachtes Tray-Symbol (Controller-Icon). Wiederverwendet, damit
+        /// UI-Updates kein neues GDI-Handle erzeugen; wird beim Beenden freigegeben.</summary>
+        private System.Drawing.Icon? _controllerIcon;
         private bool _isExplicitClose = false;
+
+        // Ein Klick auf „Gamecontroller öffnen“ darf nie zwei joy.cpl-Aufrufe gleichzeitig starten.
+        private static int _gameControllersOpening;
+
         private AppSettings _settings = new();
         private LanguageManager Lang => LanguageManager.Instance;
         private string ConfigFilePath => Path.Combine(GetDocumentsPath(), ConfigFileName);
@@ -144,7 +152,6 @@ namespace TenzoraX
         // wenn sich nichts ändert. Ohne Diffing hätte jeder UI-Update ~20 neue Brushes
         // und Canvas-Positionen erzeugt und den UI-Thread gesättigt (→ sichtbarer Lag).
         private readonly HashSet<string> _lastRenderedButtons = new();
-        private string _lastRenderedBattery = "";
         private double _lastRenderedLx, _lastRenderedLy, _lastRenderedRx, _lastRenderedRy;
         private readonly System.Diagnostics.Stopwatch _uiGate = System.Diagnostics.Stopwatch.StartNew();
         private const long MinUiUpdateIntervalMs = 8;   // max. ~120 UI-Updates/s
@@ -165,26 +172,7 @@ namespace TenzoraX
         private System.Windows.Point _dragStartPointImg = new();
         private double _originalLeftImg = 0, _originalTopImg = 0;
 
-        // Battery tracking
-        private System.Windows.Threading.DispatcherTimer? _batteryTimer;
         private bool _settingsLoaded;
-        private DateTime _lastBatteryInputTime = DateTime.MinValue;
-        private bool _batteryWasActiveLastTick = false;
-        private const double BatteryActiveTimeoutSeconds = 5;
-        private int _batteryLastIconPercent = -1;
-        // Echter Akku (HID/XInput) statt Schätzung: wird gerade ein echter Wert
-        // angezeigt (Timer darf ihn nicht überschreiben) und welcher Prozentwert.
-        private bool _showingRealBattery = false;
-        private int? _realBatteryPercent = null;
-
-        // Lade-Erkennung (Kabel oder nachweislich steigender Wert) und der letzte
-        // gemessene Stand: Wird bei ausgeschaltetem Controller geladen, kommt gar kein
-        // Wert an – dann steht der letzte bekannte Wert mit Alter statt „N/A“.
-        private readonly Detection.BatteryChargeDetector _chargeDetector = new Detection.BatteryChargeDetector();
-        private Detection.BatteryChargeState _lastRenderedCharge = Detection.BatteryChargeState.Unknown;
-        private int? _lastSeenBatteryPercent = null;
-        private DateTime _lastSeenBatteryAt = DateTime.MinValue;
-        private bool _chargeFlowActive = false;
 
         // Animierter Hintergrund (GhostFibers): Zeit wird nur weitergezählt, solange das
         // Fenster sichtbar ist – im Tray oder minimiert kostet er nichts.
@@ -199,12 +187,14 @@ namespace TenzoraX
         private int _backgroundDrawnSinceLog = 0;
         private bool _backgroundResolutionReady = false;
         private System.Windows.Point _backgroundEffectResolution = new(1, 1);
-        private DispatcherTimer? _trayChargeTimer;
-        private int _trayChargePhase = 0;
-        private readonly Dictionary<int, System.Drawing.Icon[]> _trayChargeFrames = new();
 
         public MainWindow()
         {
+            // Design VOR dem Fenster-XAML anwenden: sonst zeichnet der erste Frame
+            // die flachen Standardflächen aus App.xaml und die App „springt“ sichtbar
+            // in den gewählten Stil. Ohne gespeicherten Wert ist es 3D.
+            ApplyStartupTheme();
+
             InitializeComponent();
             Loaded += MainWindow_Loaded;
             Closing += MainWindow_Closing;
@@ -228,6 +218,25 @@ namespace TenzoraX
                 LogCrash("Dispatcher", e.Exception);
                 e.Handled = true;
             };
+        }
+
+        /// <summary>
+        /// Liest nur den Design-Stil aus der config.json (vor InitializeComponent).
+        /// Fehlt die Datei oder der Eintrag, gilt 3D.
+        /// </summary>
+        private void ApplyStartupTheme()
+        {
+            string? json = null;
+            try
+            {
+                if (File.Exists(ConfigFilePath))
+                    json = File.ReadAllText(ConfigFilePath);
+            }
+            catch
+            {
+                // Nicht lesbar → Standard (3D), LoadSettings versucht es später erneut.
+            }
+            Theme3D.Apply(Theme3D.ThemeFromConfigJson(json));
         }
 
         private string GetDocumentsPath()
@@ -385,9 +394,13 @@ namespace TenzoraX
                     RadioEditImage.IsChecked = true;
             }
 
-            // Output mode
-            ComboOutputMode.Items.Add(Lang.OutputMode_VK);
-            ComboOutputMode.Items.Add(Lang.OutputMode_ScanCode);
+            // Output mode – die Einträge legt bereits ApplyLanguage (über InitLanguage oben) an.
+            // Nur falls das ausblieb, hier nachfüllen; sonst stünde jeder Modus doppelt in der Liste.
+            if (ComboOutputMode.Items.Count == 0)
+            {
+                ComboOutputMode.Items.Add(Lang.OutputMode_VK);
+                ComboOutputMode.Items.Add(Lang.OutputMode_ScanCode);
+            }
             ComboOutputMode.SelectedIndex = _settings.OutputMode == "ScanCode" ? 1 : 0;
             ApplyOutputMode();
 
@@ -404,10 +417,6 @@ namespace TenzoraX
                 or NotificationManager.CornerBottomLeft
                 or NotificationManager.CornerBottomRight)
                 NotificationManager.Corner = _settings.NotificationCorner;
-
-            // Battery UI initialization
-            InitBatteryTimer();
-            ApplyBatteryToTray();
 
             // Final position reapply & centering after layout is complete
             Dispatcher.BeginInvoke(new Action(() =>
@@ -451,6 +460,9 @@ namespace TenzoraX
 
             _settingsLoaded = true;
             SaveSettings();
+
+            // Einklapp-Zustand des Controller-Felds aus der letzten Sitzung anwenden.
+            SetGamepadCollapsed(_settings.GamepadCollapsed, persist: false);
 
             // Notify user if previous session crashed
             if (App.HasCrashLog)
@@ -937,20 +949,78 @@ namespace TenzoraX
                 ComboGamepads.Items.Add(Lang.Combo_NoController);
                 ComboGamepads.SelectedIndex = 0;
                 SetStatusText(Lang.Status_Disconnected, System.Windows.Media.Brushes.Gray);
-                TxtBattery.Text = Lang.Battery_NA;
             }
             else
             {
                 foreach (var c in _comboControllers)
                 {
-                    string suffix = c.AccessError ? " ⚠" : "";
-                    ComboGamepads.Items.Add(c.Name + " (" + c.ConnectionType + ")" + suffix);
+                    // Deaktivierte Windows-Schnittstellen nennt der Eintrag beim Namen
+                    // („– deaktiviert (Windows)“) statt sie als normalen Controller zu zeigen.
+                    ComboGamepads.Items.Add(ControllerManager.FormatControllerListEntry(c));
                 }
                 int idx = ControllerManager.Instance.ActiveGamepadIndex;
                 if (idx >= 0 && idx < _comboControllers.Count)
                     ComboGamepads.SelectedIndex = idx;
                 UpdateStatusFromSelection();
             }
+
+            UpdateInputMismatchBanner();
+        }
+
+        /// <summary>
+        /// Zeigt den Hinweis, wenn die App ein Pad listet, Windows aber weder XInput noch
+        /// DirectInput ein Gerät führt – dann ist typischerweise die Schnittstelle in Windows
+        /// deaktiviert, und das Pad fehlt im Panel „Game Controller“ und bei Steam.
+        /// </summary>
+        private void UpdateInputMismatchBanner()
+        {
+            string warning = ControllerManager.Instance.InputVisibilityWarning;
+            bool show = !string.IsNullOrWhiteSpace(warning) && _comboControllers.Count > 0;
+            TxtInputMismatch.Text = show ? warning : "";
+            BannerInputMismatch.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+
+            // Der Knopf erscheint nur, wenn die Schnittstelle bekannt ist – sonst gibt es
+            // nichts, was die App gezielt einschalten könnte.
+            bool canRepair = show && !string.IsNullOrEmpty(ControllerManager.Instance.DisabledInterfaceId);
+            BtnEnableDisabledInterface.Visibility = canRepair ? Visibility.Visible : Visibility.Collapsed;
+            BtnEnableDisabledInterface.IsEnabled = canRepair;
+        }
+
+        /// <summary>
+        /// Schaltet die deaktivierte Schnittstelle direkt wieder ein (einmalige UAC-Abfrage,
+        /// falls die App nicht erhöht läuft) und meldet das Ergebnis im Banner.
+        /// </summary>
+        private async void BtnEnableDisabledInterface_Click(object sender, RoutedEventArgs e)
+        {
+            string instanceId = ControllerManager.Instance.DisabledInterfaceId;
+            if (string.IsNullOrEmpty(instanceId)) return;
+
+            BtnEnableDisabledInterface.IsEnabled = false;
+            BtnEnableDisabledInterface.Content = "Aktiviere …";
+            TxtInputMismatch.Text = "Schnittstelle wird aktiviert – Administratorabfrage bestätigen.";
+
+            bool ok;
+            string message;
+            try
+            {
+                (ok, message) = await System.Threading.Tasks.Task.Run(
+                    () => DeviceInterfaceRecovery.Enable(instanceId));
+            }
+            catch (Exception ex)
+            {
+                ok = false;
+                message = "Aktivieren fehlgeschlagen: " + ex.Message;
+            }
+
+            App.LogApp("Banner: Schnittstelle aktivieren – " + (ok ? "ok" : "fehlgeschlagen") + ": " + message);
+
+            TxtInputMismatch.Text = message;
+            BtnEnableDisabledInterface.Content = "Schnittstelle aktivieren";
+            BtnEnableDisabledInterface.IsEnabled = true;
+
+            // Bei Erfolg verschwindet das Banner mit dem nächsten Rescan (Schnittstelle
+            // läuft, Windows sieht das Gerät wieder); bei Misserfolg bleibt der Text stehen.
+            if (ok) RefreshGamepadsList();
         }
 
         private void ComboGamepads_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -977,7 +1047,6 @@ namespace TenzoraX
             if (_comboControllers.Count == 0 || idx < 0 || idx >= _comboControllers.Count)
             {
                 SetStatusText(Lang.Status_Disconnected, System.Windows.Media.Brushes.Gray);
-                TxtBattery.Text = Lang.Battery_NA;
                 return;
             }
 
@@ -985,7 +1054,6 @@ namespace TenzoraX
             if (c.AccessError)
             {
                 SetStatusText(Lang.Status_AccessError, System.Windows.Media.Brushes.Orange);
-                TxtBattery.Text = Lang.Battery_NA;
                 App.LogApp("Controller ohne Zugriff: " + c.Name + " – " + c.AccessErrorReason);
             }
             else
@@ -1046,13 +1114,53 @@ namespace TenzoraX
             }
         }
 
+        /// <summary>Höhe des Controller-Bereichs vor dem Einklappen (DIP).</summary>
+        private double _gamepadRowHeight = 370;
+        private bool _gamepadCollapsed;
+
+        private void BtnToggleGamepad_Click(object sender, RoutedEventArgs e)
+            => SetGamepadCollapsed(!_gamepadCollapsed, persist: true);
+
+        /// <summary>
+        /// Klappt das Controller-Feld auf seine Kopfzeile zusammen, damit die Tastatur den
+        /// ganzen linken Bereich bekommt. Ausgeklappt wird die vorherige Höhe wiederhergestellt.
+        /// </summary>
+        private void SetGamepadCollapsed(bool collapsed, bool persist)
+        {
+            _gamepadCollapsed = collapsed;
+
+            if (collapsed)
+            {
+                if (GamepadRow.ActualHeight > 0) _gamepadRowHeight = GamepadRow.ActualHeight;
+                GamepadRow.Height = GridLength.Auto;
+            }
+            else
+            {
+                GamepadRow.Height = new GridLength(_gamepadRowHeight > 0 ? _gamepadRowHeight : 370);
+            }
+
+            SplitterRow.Height = collapsed ? new GridLength(0) : new GridLength(8);
+            SplitterGamepad.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+            GamepadLiveRow.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+            GamepadSurface.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+
+            BtnToggleGamepad.Content = collapsed ? "▸" : "▾";
+            BtnToggleGamepad.ToolTip = collapsed ? Lang.Gamepad_Expand : Lang.Gamepad_Collapse;
+
+            if (persist)
+            {
+                _settings.GamepadCollapsed = collapsed;
+                SaveSettings();
+            }
+        }
+
         private void OnControllerStateChanged(object? sender, ControllerStateEventArgs e)
         {
             // Eingabe-Verarbeitung direkt auf dem Poll-Thread: StateChanged wird
             // ausschließlich vom Poll-Thread ausgelöst (ReadXInput/ReadHid/
             // ReadWinMM). Die Mapping-Ausgabe (SendInput) läuft damit NICHT über
             // den WPF-Dispatcher und wird durch UI-Stau (Stick-Visualisierung,
-            // Button-Highlights, Batterie) nicht mehr verzögert.
+            // Button-Highlights) nicht mehr verzögert.
             LatencyMonitor.MarkInputEvent();
             ProfileManager.Instance.ProcessControllerInput(e.PressedButtons);
 
@@ -1086,31 +1194,6 @@ namespace TenzoraX
 
         private void UpdateUiFromControllerState(ControllerStateEventArgs e)
         {
-            // Track battery input time
-                if (_settings.BatteryEnabled && e.ControllerName != "None" && e.PressedButtons.Count > 0)
-                    _lastBatteryInputTime = DateTime.UtcNow;
-
-                // Echter Akku (HID-Report / XInput) hat Vorrang vor der berechneten Schätzung.
-                bool hasRealBattery = !string.IsNullOrEmpty(e.BatteryInfo) && e.BatteryInfo != "N/A";
-                int? realPercent = null;
-                if (hasRealBattery && int.TryParse(e.BatteryInfo.TrimEnd('%'),
-                        System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out int parsedPercent))
-                    realPercent = parsedPercent;
-
-                // Lade-Erkennung: Kabel (XInput BATTERY_TYPE_WIRED) oder ein nachweislich
-                // steigender Akkuwert. Ist der Controller weg, wird nichts behauptet.
-                if (e.ControllerName == "None")
-                    _chargeDetector.Reset();
-                else
-                    _chargeDetector.Observe(DateTime.UtcNow, realPercent, e.OnCable);
-
-                if (realPercent is int measuredPercent)
-                {
-                    _lastSeenBatteryPercent = measuredPercent;
-                    _lastSeenBatteryAt = DateTime.UtcNow;
-                }
-
                 if (e.ControllerName == "None")
                 {
                     if (HasAnyAccessError())
@@ -1125,22 +1208,6 @@ namespace TenzoraX
                 else
                 {
                     SetStatusText(Lang.Status_Connected, System.Windows.Media.Brushes.LightGreen);
-                }
-
-                // Batterie nur bei tatsächlicher Änderung aktualisieren (ändert sich
-                // nur ~1×/Sekunde – nicht bei jedem der 250 Polls pro Sekunde). Auch ein
-                // reiner Zustandswechsel (Kabel rein/raus) muss neu zeichnen, obwohl der
-                // Prozentwert gleich bleibt.
-                if (e.BatteryInfo != _lastRenderedBattery || _chargeDetector.State != _lastRenderedCharge)
-                {
-                    if (_chargeDetector.State != _lastRenderedCharge)
-                        App.LogApp("Akku-Status: " + _chargeDetector.State
-                            + (_chargeDetector.LastRealPercent is int loggedPercent ? " (" + loggedPercent + "%)" : "")
-                            + (e.OnCable ? " [USB]" : ""));
-
-                    _lastRenderedBattery = e.BatteryInfo;
-                    _lastRenderedCharge = _chargeDetector.State;
-                    RefreshBatteryDisplay(realPercent);
                 }
 
                 foreach (var pair in _gamepadButtonsUi)
@@ -1229,226 +1296,6 @@ namespace TenzoraX
                 }
             }
         }
-
-        /// <summary>
-        /// Zeigt die Akku-Warnung (⚠) im Hauptfenster, sobald der ECHTE Akkustand
-        /// unter 20 % fällt. Die Schätzung löst keine Warnung aus.
-        /// </summary>
-        private void UpdateBatteryLowWarning()
-        {
-            bool low = _realBatteryPercent is int rp && rp < 20;
-            TxtBatteryWarning.Visibility = low
-                ? System.Windows.Visibility.Visible
-                : System.Windows.Visibility.Collapsed;
-        }
-
-        /// <summary>
-        /// Zeichnet den Akku-Balken. Negative Werte (kein Wert bekannt) lassen ihn
-        /// leer und grau. Die Farbschwellen kommen aus <see cref="BatteryColorFor"/> –
-        /// eine Quelle für Fenster und Tray.
-        /// </summary>
-        private void UpdateBatteryBar(double percent)
-        {
-            if (percent < 0)
-            {
-                BatteryLevel.Width = 2;
-                BatteryLevel.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(100, 100, 100));
-                return;
-            }
-
-            double clamped = Math.Clamp(percent, 0, 100);
-            BatteryLevel.Width = Math.Max(2, 22 * Math.Max(0.05, clamped / 100.0));
-            BatteryLevel.Background = new System.Windows.Media.SolidColorBrush(BatteryColorFor(clamped));
-        }
-
-        /// <summary>Farbe des Akku-Balkens – Schwellen an einer Stelle.</summary>
-        private static System.Windows.Media.Color BatteryColorFor(double percent) =>
-            percent > 60 ? System.Windows.Media.Color.FromRgb(16, 185, 129)
-            : percent > 30 ? System.Windows.Media.Color.FromRgb(245, 158, 11)
-            : percent > 10 ? System.Windows.Media.Color.FromRgb(251, 146, 60)
-            : System.Windows.Media.Color.FromRgb(239, 68, 68);
-
-        /// <summary>
-        /// Zeichnet den Akku-Bereich neu. Reihenfolge der Aussagekraft: echter Messwert →
-        /// Timer-Schätzung → letzter bekannter Wert mit Altersangabe → „N/A“.
-        /// </summary>
-        private void RefreshBatteryDisplay(int? realPercent)
-        {
-            if (realPercent is int measured)
-            {
-                // Echter Wert (HID/XInput) – anzeigen statt der Schätzung.
-                _showingRealBattery = true;
-                _realBatteryPercent = measured;
-                TxtBattery.Text = measured + "%";
-                UpdateBatteryBar(measured);
-            }
-            else if (_settings.BatteryEnabled)
-            {
-                // Kein echter Wert, Schätzung an → sofort den Timer-Wert zeigen.
-                _showingRealBattery = false;
-                _realBatteryPercent = null;
-                UpdateCalculatedBatteryBar();
-            }
-            else if (_lastSeenBatteryPercent is int lastSeen)
-            {
-                // Kein aktueller Wert, aber ein früherer: nicht „N/A“, sondern der letzte
-                // gemessene Stand mit Alter – genau der Fall „Laden bei ausgeschaltetem
-                // Controller“, in dem gar kein Gerät mehr existiert.
-                _showingRealBattery = false;
-                _realBatteryPercent = null;
-                TxtBattery.Text = FormatLastSeenBattery(lastSeen);
-                UpdateBatteryBar(lastSeen);
-            }
-            else
-            {
-                _showingRealBattery = false;
-                _realBatteryPercent = null;
-                TxtBattery.Text = Lang.Battery_NA;
-                UpdateBatteryBar(-1);
-            }
-
-            ApplyChargeVisuals();
-            UpdateBatteryLowWarning();
-            // Tray/Tooltip mitziehen – der 1-s-Timer wird bei echtem Akku übersprungen.
-            ApplyBatteryToTray();
-        }
-
-        /// <summary>
-        /// Der letzte gemessene Akkustand mit Altersangabe – damit die Anzeige nicht
-        /// leer wirkt, wenn gerade kein Gerät meldet (z.B. Laden bei ausgeschaltetem Pad).
-        /// </summary>
-        private string FormatLastSeenBattery(int percent)
-        {
-            TimeSpan age = DateTime.UtcNow - _lastSeenBatteryAt;
-            string when = age.TotalMinutes < 1 ? Lang.Battery_JustNow
-                        : age.TotalMinutes < 60 ? Lang.Format("Battery_AgeMinutes", (int)age.TotalMinutes)
-                        : age.TotalHours < 24 ? Lang.Format("Battery_AgeHours", (int)age.TotalHours)
-                        : Lang.Format("Battery_AgeDays", (int)age.TotalDays);
-            return Lang.Format("Battery_LastSeen", percent, when);
-        }
-
-        /// <summary>Aktuell anzuzeigender Prozentwert: echt vor Schätzung vor letztem Stand.</summary>
-        private double CurrentBatteryPercent()
-        {
-            if (_realBatteryPercent is int real) return real;
-            if (_settings.BatteryEnabled) return GetCalculatedBatteryPercent();
-            if (_lastSeenBatteryPercent is int seen) return seen;
-            return 0;
-        }
-
-        /// <summary>
-        /// Kennzeichnung und Animation des Ladens. Es gibt keine Animation ohne Beleg:
-        /// nur ein steigender Akkuwert gilt als Ladung. XInputs BATTERY_TYPE_WIRED ist
-        /// dafür untauglich – er stimmt am Kabel **und** über den Funkempfänger.
-        /// </summary>
-        private void ApplyChargeVisuals()
-        {
-            // „Lädt“ nur bei nachgewiesenem Anstieg des Akkuwerts. Eine bloße USB-Verbindung
-            // ist kein Ladungsbeweis – der 2,4-GHz-Empfänger ist selbst USB (gemessen am
-            // 13.09.2026: dasselbe Pad meldet kabellos wie am Kabel BATTERY_TYPE_WIRED).
-            bool charging = _chargeDetector.State == Detection.BatteryChargeState.Charging;
-            TxtChargeState.Text = charging ? Lang.Battery_Charging : "";
-            TxtChargeState.Visibility = charging
-                ? System.Windows.Visibility.Visible
-                : System.Windows.Visibility.Collapsed;
-
-            bool animate = charging && _settings.BatteryAnimationEnabled;
-            ChargeFlow.Visibility = animate
-                ? System.Windows.Visibility.Visible
-                : System.Windows.Visibility.Collapsed;
-            if (animate) StartChargeFlow(); else StopChargeFlow();
-        }
-
-        /// <summary>Wandernder Lichtstreifen im Akku-Balken (WPF-Storyboard, kein Timer).</summary>
-        private void StartChargeFlow()
-        {
-            if (_chargeFlowActive) return;
-            _chargeFlowActive = true;
-            var anim = new System.Windows.Media.Animation.DoubleAnimation(-6, 22, TimeSpan.FromSeconds(1.2))
-            {
-                RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever
-            };
-            ChargeFlowShift.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, anim);
-        }
-
-        private void StopChargeFlow()
-        {
-            if (!_chargeFlowActive) return;
-            _chargeFlowActive = false;
-            ChargeFlowShift.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, null);
-        }
-
-        #region Battery Tracking
-
-        private void InitBatteryTimer()
-        {
-            _batteryTimer?.Stop();
-            if (!_settings.BatteryEnabled) return;
-
-            _batteryTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromSeconds(1)
-            };
-            _batteryTimer.Tick += BatteryTimer_Tick;
-            _batteryTimer.Start();
-        }
-
-        private void BatteryTimer_Tick(object? sender, EventArgs e)
-        {
-            if (!_settings.BatteryEnabled) return;
-
-            bool isActive = (DateTime.UtcNow - _lastBatteryInputTime).TotalSeconds < BatteryActiveTimeoutSeconds;
-
-            // Am Kabel bzw. beim Laden fließt kein Akkustrom – dann darf der Timer nicht
-            // herunterzählen, sonst steht nach einer Ladung ein Wert da, den es nicht gibt.
-            if (isActive && Detection.BatteryEstimate.ShouldCountActivity(_chargeDetector.State))
-            {
-                _settings.BatteryActiveMinutes += 1.0 / 60.0;
-                SaveSettings();
-            }
-
-            _batteryWasActiveLastTick = isActive;
-
-            // Echter Akku (HID/XInput) wird gerade angezeigt – die Schätzung darf
-            // den Wert nicht überschreiben.
-            if (_showingRealBattery)
-            {
-                // ... aber sie wird auf den gemessenen Stand nachgezogen, damit sie beim
-                // nächsten Wechsel (Pad weg, keine echten Werte mehr) nicht mit einem
-                // alten Verbrauch weiterläuft.
-                if (_realBatteryPercent is int measured)
-                {
-                    double target = Detection.BatteryEstimate.MinutesForPercent(measured, _settings.BatteryHours);
-                    if (Math.Abs(target - _settings.BatteryActiveMinutes) > 0.5)
-                    {
-                        _settings.BatteryActiveMinutes = target;
-                        SaveSettings();
-                    }
-                }
-                return;
-            }
-            UpdateCalculatedBatteryBar();
-        }
-
-        private double GetCalculatedBatteryPercent()
-        {
-            if (_settings.BatteryHours <= 0) return 100;
-            double totalMinutes = _settings.BatteryHours * 60;
-            double consumptionPerMinute = 100.0 / totalMinutes;
-            double used = _settings.BatteryActiveMinutes * consumptionPerMinute;
-            double percent = 100.0 - used;
-            return Math.Max(0, Math.Min(100, percent));
-        }
-
-        private void UpdateCalculatedBatteryBar()
-        {
-            double percent = GetCalculatedBatteryPercent();
-            TxtBattery.Text = $"{percent:F1}%";
-            UpdateBatteryBar(percent);
-            ApplyBatteryToTray();
-        }
-
-        #endregion
 
         #region Animated Background (GhostFibers)
 
@@ -1668,225 +1515,10 @@ namespace TenzoraX
 
         #endregion
 
-        #region Battery UI Handlers
-
-        private void ApplyBatteryToTray()
-        {
-            if (_notifyIcon == null) return;
-
-            // Echter Akku hat Vorrang; sonst die Schätzung; sonst der letzte bekannte Stand.
-            double percent = CurrentBatteryPercent();
-
-            // Batterie-Icon im Tray zeigen, wenn aktiviert UND (Schätzung an ODER ein
-            // echter bzw. zuletzt gesehener Akkuwert vorliegt – der echte Wert funktioniert
-            // auch ohne Schätzung).
-            if (!_settings.BatteryTrayEnabled ||
-                (!_settings.BatteryEnabled && _realBatteryPercent == null && _lastSeenBatteryPercent == null))
-            {
-                StopTrayChargeAnimation();
-                // Standard-Icon ist gecacht – nur zuweisen, wenn es sich wirklich
-                // geändert hat (sonst bei jedem UI-Update neues GDI-Handle → Leak).
-                var defaultIcon = CreateControllerIcon();
-                if (!ReferenceEquals(_notifyIcon.Icon, defaultIcon))
-                    _notifyIcon.Icon = defaultIcon;
-                _notifyIcon.Text = "TenzoraX";
-                _batteryLastIconPercent = -1;
-                return;
-            }
-
-            int intPercent = (int)Math.Round(percent);
-
-            // Build tooltip with controller info
-            string controllerName = "Kein Controller";
-            string batteryLabel = $"{percent:F1}%";
-            var controllers = ControllerManager.Instance.ConnectedControllerNames;
-            if (controllers.Count > 0)
-                controllerName = controllers[0];
-
-            string tip = $"TenzoraX\n{Lang.Battery_Label}: {batteryLabel}";
-            if (_realBatteryPercent is int rp && rp < 20)
-                tip += "\n" + Lang.Battery_Low;
-            if (_chargeDetector.State == Detection.BatteryChargeState.Charging)
-                tip += "\n" + Lang.Battery_Charging;
-            if ((DateTime.UtcNow - _lastBatteryInputTime).TotalSeconds < BatteryActiveTimeoutSeconds)
-                tip += $"\n{(Lang.CurrentLang == "de" ? "Controller aktiv" : "Controller active")}";
-            _notifyIcon.Text = tip;
-
-            // Ladeanimation im Tray: eigene, gecachte Frames statt der Prozent-PNGs.
-            if (_chargeDetector.State == Detection.BatteryChargeState.Charging && _settings.BatteryAnimationEnabled)
-            {
-                StartTrayChargeAnimation(percent);
-                return;
-            }
-            StopTrayChargeAnimation();
-
-            // Only recreate icon when integer percentage changes
-            if (intPercent == _batteryLastIconPercent) return;
-            _batteryLastIconPercent = intPercent;
-
-            // Replace icon: assign the new one first, then dispose the old one
-            // (never dispose an icon while NotifyIcon still references it)
-            var newIcon = LoadBatteryIcon(percent);
-            var oldIcon = _batteryIcon;
-            _batteryIcon = newIcon;
-            _notifyIcon.Icon = newIcon;
-            if (oldIcon != null)
-            {
-                try { oldIcon.Dispose(); } catch { }
-            }
-        }
-
-        private System.Drawing.Icon? _batteryIcon;
-        // Gecachtes Standard-Icon: einmal erzeugen und wiederverwenden statt bei
-        // jedem UI-Update neu zu allokieren (GDI-Handle-Leak → GDI+-Crash).
-        private System.Drawing.Icon? _controllerIcon;
-
-        /// <summary>
-        /// Startet/stoppt den Frame-Zyklus des Lade-Symbols im Tray. Läuft nur, solange
-        /// geladen wird und die Animation eingeschaltet ist – sonst pausiert er und das
-        /// normale Prozent-Symbol steht wieder.
-        /// </summary>
-        private void StartTrayChargeAnimation(double percent)
-        {
-            var tray = _notifyIcon;
-            if (tray == null) return;
-
-            var frames = GetTrayChargeFrames(percent);
-            _batteryLastIconPercent = -1;   // nach dem Laden wieder normal zeichnen
-            _trayChargePhase = (_trayChargePhase + 1) % frames.Length;
-            tray.Icon = frames[_trayChargePhase];
-
-            if (_trayChargeTimer == null)
-            {
-                _trayChargeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
-                _trayChargeTimer.Tick += (s, e) =>
-                {
-                    if (_notifyIcon == null) return;
-                    var current = GetTrayChargeFrames(CurrentBatteryPercent());
-                    _trayChargePhase = (_trayChargePhase + 1) % current.Length;
-                    _notifyIcon.Icon = current[_trayChargePhase];
-                };
-            }
-            if (!_trayChargeTimer.IsEnabled) _trayChargeTimer.Start();
-        }
-
-        private void StopTrayChargeAnimation()
-        {
-            if (_trayChargeTimer == null) return;
-            if (_trayChargeTimer.IsEnabled) _trayChargeTimer.Stop();
-        }
-
-        /// <summary>
-        /// Die vier Frames eines Lade-Symbols für einen Prozent-Bereich. Alle Frames
-        /// werden einmal gezeichnet und behalten – ein Icon pro Tick neu zu bauen würde
-        /// GDI-Handles leaken (dieselbe Falle wie bei CreateControllerIcon).
-        /// </summary>
-        private System.Drawing.Icon[] GetTrayChargeFrames(double percent)
-        {
-            int bucket = (int)(Math.Round(Math.Clamp(percent, 0, 100) / 5.0) * 5);
-            if (_trayChargeFrames.TryGetValue(bucket, out var cached)) return cached;
-
-            var frames = new System.Drawing.Icon[4];
-            for (int phase = 0; phase < frames.Length; phase++)
-                frames[phase] = DrawBatteryIcon(bucket, phase);
-            _trayChargeFrames[bucket] = frames;
-            return frames;
-        }
-
-        /// <summary>
-        /// Zeichnet ein Tray-Symbol: Akku-Kontur, Füllstand in der Farbe des Fensters und
-        /// – beim Laden – einen wandernden Lichtstreifen. Ohne neue Bilddateien und ohne
-        /// zusätzliche Abhängigkeit.
-        /// </summary>
-        private System.Drawing.Icon DrawBatteryIcon(int percent, int? phase)
-        {
-            var fillColor = BatteryColorFor(percent);
-            using (var bmp = new System.Drawing.Bitmap(32, 32))
-            using (var g = System.Drawing.Graphics.FromImage(bmp))
-            {
-                g.Clear(System.Drawing.Color.Transparent);
-
-                using (var outline = new System.Drawing.Pen(System.Drawing.Color.FromArgb(225, 225, 235), 2))
-                    g.DrawRectangle(outline, 2, 9, 25, 14);
-                using (var tipBrush = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(225, 225, 235)))
-                    g.FillRectangle(tipBrush, 28, 13, 3, 6);
-
-                int inner = (int)Math.Round(22.0 * Math.Clamp(percent, 0, 100) / 100.0);
-                if (inner > 0)
-                {
-                    using (var fill = new System.Drawing.SolidBrush(
-                        System.Drawing.Color.FromArgb(fillColor.R, fillColor.G, fillColor.B)))
-                        g.FillRectangle(fill, 4, 11, inner, 10);
-                }
-
-                if (phase is int p)
-                {
-                    // Lichtstreifen wandert über den Balken, bleibt aber innen begrenzt.
-                    g.SetClip(new System.Drawing.Rectangle(4, 11, 22, 10));
-                    int x = 4 + (int)Math.Round(28.0 * p / 4.0) - 6;
-                    using (var glow = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(150, 255, 255, 255)))
-                        g.FillRectangle(glow, x, 11, 4, 10);
-                    g.ResetClip();
-                }
-
-                var hIcon = bmp.GetHicon();
-                try
-                {
-                    return (System.Drawing.Icon)System.Drawing.Icon.FromHandle(hIcon).Clone();
-                }
-                finally
-                {
-                    DestroyIcon(hIcon);
-                }
-            }
-        }
-
-        private System.Drawing.Icon LoadBatteryIcon(double percent)
-        {
-            string fileName = percent >= 80 ? "battery_100.png"
-                           : percent >= 60 ? "battery_80.png"
-                           : percent >= 40 ? "battery_50.png"
-                           : percent >= 20 ? "battery_25.png"
-                           : percent > 0  ? "battery_10.png"
-                           : "battery_0.png";
-
-            try
-            {
-                var uri = new Uri($"pack://application:,,,/assets/battery/{fileName}", UriKind.RelativeOrAbsolute);
-                var streamInfo = System.Windows.Application.GetResourceStream(uri);
-                if (streamInfo != null)
-                {
-                    using (var stream = streamInfo.Stream)
-                    using (var bitmap = new System.Drawing.Bitmap(stream))
-                    {
-                        var hIcon = bitmap.GetHicon();
-                        try
-                        {
-                            // Clone copies the handle before the bitmap disposes it; original is released explicitly
-                            var clone = System.Drawing.Icon.FromHandle(hIcon).Clone();
-                            return (System.Drawing.Icon)clone;
-                        }
-                        finally
-                        {
-                            DestroyIcon(hIcon);
-                        }
-                    }
-                }
-            }
-            catch { }
-
-            return CreateControllerIcon();
-        }
-
+        /// <summary>Übernimmt den Ausgabemodus („VK“ oder „ScanCode“) auf den Input-Simulator.</summary>
         private void ApplyOutputMode()
         {
-            string mode = _settings.OutputMode;
-            InputSimulator.OutputMode = mode;
-
-            if (!InputSimulator.IsRunningAsAdmin())
-            {
-                Debug.WriteLine("Warning: Not running as admin. SendInput may be blocked from reaching elevated applications (e.g. RTSS running as admin).");
-            }
+            InputSimulator.OutputMode = _settings.OutputMode;
         }
 
         private void ComboOutputMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1902,7 +1534,6 @@ namespace TenzoraX
 
         #endregion
 
-        #endregion
 
         #region Profiles Management
 
@@ -2045,7 +1676,13 @@ namespace TenzoraX
                 existing.Name = name;
             }
             else
-                ProfileManager.Instance.AddMapping(new Mapping { Combo = new List<string>(_capture.CurrentCombo), Action = new List<string>(_capture.CurrentAction), Text = _capture.CurrentActionText, Name = name });
+                ProfileManager.Instance.AddMapping(new Mapping
+                {
+                    Combo = new List<string>(_capture.CurrentCombo),
+                    Action = new List<string>(_capture.CurrentAction),
+                    Text = _capture.CurrentActionText,
+                    Name = name
+                });
 
             ProfileManager.Instance.SaveActiveProfile();
             _capture.Reset();
@@ -2132,6 +1769,9 @@ namespace TenzoraX
                 _settings = new AppSettings();
                 SaveSettings();
             }
+
+            // Design-Stil anwenden, bevor das Fenster zum ersten Mal gezeichnet wird.
+            Theme3D.Apply(_settings.UiTheme);
 
             if (_settings.RelativeButtonPositions.Count == 0)
             {
@@ -2940,8 +2580,10 @@ namespace TenzoraX
             if (!IsLoaded) return; // Fenster wurde inzwischen geschlossen
             try
             {
+                // Schreibweise der Instanz-ID ist je nach Quelle unterschiedlich (siehe
+                // DeviceHelpers.NormalizeInstanceKey) – hier zählt nur: ist das Gerät noch da?
                 bool stillThere = ControllerManager.Instance.ConnectedControllers
-                    .Any(c => c.InstanceId == instanceId);
+                    .Any(c => string.Equals(c.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase));
                 if (!stillThere && _hidhideAutoActive)
                 {
                     var targets = _hidhideHidden.ToList();
@@ -3005,11 +2647,33 @@ namespace TenzoraX
         /// </summary>
         private void BtnOpenGameControllersMain_Click(object sender, RoutedEventArgs e)
         {
-            try
+            if (System.Threading.Interlocked.Exchange(ref _gameControllersOpening, 1) == 1) return;
+
+            // Das Panel wird im Hintergrund geöffnet: Es wartet ggf. auf eine ruhige
+            // Geräteliste und prüft, ob das Fenster wirklich erscheint. Der UI-Thread
+            // bleibt währenddessen bedienbar.
+            DateTime lastChange = ControllerManager.Instance.LastControllerChangeUtc;
+            System.Threading.Tasks.Task.Run(() =>
             {
-                Process.Start(new ProcessStartInfo("joy.cpl") { UseShellExecute = true });
-            }
-            catch { }
+                var result = GameControllersPanel.Open(lastChange);
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    System.Threading.Interlocked.Exchange(ref _gameControllersOpening, 0);
+                    if (!result.Success)
+                    {
+                        // Der konkrete Grund (z.B. DirectInput-Stau, Geräte werden gerade
+                        // neu gestartet) hilft mehr als der allgemeine Text.
+                        string message = string.IsNullOrWhiteSpace(result.ErrorMessage)
+                            ? Lang.GamepadPanel_FailedMsg
+                            : result.ErrorMessage;
+                        System.Windows.MessageBox.Show(
+                            this,
+                            message,
+                            Lang.GamepadPanel_FailedTitle,
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+                    }
+                }));
+            });
         }
 
         private void TabsRightPanel_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -3316,19 +2980,7 @@ namespace TenzoraX
             // 1. Stop controller polling
             try { ControllerManager.Instance.Shutdown(); } catch { }
 
-            // 2. Stop battery timer
-            try { _batteryTimer?.Stop(); _batteryTimer = null; } catch { }
-
-            // 2a. Lade-Animation im Tray beenden und die gezeichneten Frames freigeben
-            try { StopTrayChargeAnimation(); _trayChargeTimer = null; } catch { }
-            foreach (var frames in _trayChargeFrames.Values)
-                foreach (var icon in frames)
-                {
-                    try { icon.Dispose(); } catch { }
-                }
-            _trayChargeFrames.Clear();
-
-            // 2b. Stop driver status timer
+            // 2. Stop driver status timer
             try { _driversStatusTimer?.Stop(); _driversStatusTimer = null; } catch { }
 
             // 3. Save window position, size and settings
@@ -3351,13 +3003,7 @@ namespace TenzoraX
             }
             catch { }
 
-            // 5. Dispose battery icon
-            if (_batteryIcon != null)
-            {
-                try { _batteryIcon.Dispose(); _batteryIcon = null; } catch { }
-            }
-
-            // 5b. Dispose cached controller icon (SystemIcons.Application gehört
+            // 5. Dispose cached controller icon (SystemIcons.Application gehört
             //     dem System – die darf nicht disposet werden).
             if (_controllerIcon != null && !ReferenceEquals(_controllerIcon, SystemIcons.Application))
             {

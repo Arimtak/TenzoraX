@@ -22,6 +22,15 @@ namespace TenzoraX.Detection
     ///    Daten-Bytes [0..9] identisch zum 2C-Layout ([1]=Hat, [2..5]=Sticks,
     ///    [6]=R2, [7]=L2, [8]=Face, [9]=Menu), dahinter Zusatz-Bytes
     ///    [10..13]=0 (Batterie/LED) und [14]/[15]=Checksumme/CRC; Rest Padding.
+    /// 4) 32 Byte – 8BitDo Ultimate 3 Bluetooth (VID_2DC8&PID_202F), ReportID 0x01.
+    ///    Diese Sammlung deklariert im HID-Descriptor KEINE Achsen/Buttons, deshalb
+    ///    wird sie nur über diesen Parser ausgewertet. Layout (aus einer
+    ///    Tastenaufzeichnung abgeleitet, Mitte jeweils 0x7F/0x80):
+    ///    [1]=Hat (0=N, 2=O, 4=S, 6=W, 8=neutral), [2]=LX, [3]=LY, [4]=RX, [5]=RY,
+    ///    [6]=RT analog, [7]=LT analog (gemessen), [8]/[9]=Tastenmaske,
+    ///    [8] belegt wie bei der gesamten Ultimate-Familie: 0x01=A, 0x02=B,
+    ///    0x08=X, 0x10=Y, 0x40=L1, 0x80=R1.
+    ///    [10..13]=0, [14]=Akkustand (%), [15..29]=IMU, [30..31]=Zähler.
     /// </summary>
     internal static class ManualReportParser
     {
@@ -70,7 +79,53 @@ namespace TenzoraX.Detection
                 return (pressed, lx, ly, rx, ry);
             }
 
+            // --- 32 Byte: 8BitDo Ultimate 3 Bluetooth ---
+            // ReportID 0x01 als Schutz davor, 32-Byte-Reports fremder Geräte
+            // fälschlich als dieses Layout zu lesen (dann neutral).
+            if (report.Length == 32 && report[0] == 0x01)
+            {
+                byte b8 = report[8];
+                byte b9 = report[9];
+
+                MapHat(report[1], pressed);   // 8 = neutral, wird von MapHat ignoriert
+
+                // Sticks: Mitte 0x7F/0x80, oben/links kleiner. Im Programm ist
+                // oben/hoch positiv – daher Y-Achsen invertieren.
+                lx = Normalize8(report[2]);
+                ly = -Normalize8(report[3]);
+                rx = Normalize8(report[4]);
+                ry = -Normalize8(report[5]);
+
+                // Trigger: LT analog in [7], RT analog in [6] (Einzelmessung),
+                // zusätzlich als Digitalbit in [9]: 0x01 = LT, 0x02 = RT.
+                if (report[7] > 0x20 || (b9 & 0x01) != 0) pressed.Add("L2");
+                if (report[6] > 0x20 || (b9 & 0x02) != 0) pressed.Add("R2");
+
+                // Face-Tasten wie bei 2C/2-Wireless/generisch (0x01=A, 0x02=B,
+                // 0x08=X, 0x10=Y). Eine frühere Aufzeichnung hatte diese vier
+                // Bits um eine Position verschoben, weil die Drücke nicht
+                // einzeln getrennt waren – B/L1/R1 waren dort schon korrekt.
+                MapUltimateFace(b8, pressed);
+
+                if ((b9 & 0x04) != 0) pressed.Add("SELECT");
+                if ((b9 & 0x08) != 0) pressed.Add("START");
+                if ((b9 & 0x10) != 0) pressed.Add("HOME");
+                if ((b9 & 0x20) != 0) pressed.Add("L3");
+                if ((b9 & 0x40) != 0) pressed.Add("R3");
+
+                return (pressed, lx, ly, rx, ry);
+            }
+
             // --- 16 Byte: generisches 8BitDo-Layout (Ultimate Mobile) ---
+            // ACHTUNG: 16 Byte ist auch das Format der Windows-Fassade
+            // "XINPUT-kompatibles HID-Gerät" (VID_045E&PID_02FF, xinputhid). Dort
+            // steht der feste Rahmen [2]=0x80, [3]=0xFF, [4]=0x7F; [8]=0x80 ist
+            // dort ein Achsenbyte und KEIN R2. Ohne diese Sperre entstehen
+            // dauerhaft "R2 gedrückt" und zappelnde Sticks (gemessen 26.10.2026
+            // am 8BitDo Ultimate 3, PID_202F am Kabel).
+            if ((report.Length == 16 || report.Length == 64) && IsXInputHidFrame(report))
+                return (pressed, 0f, 0f, 0f, 0f);
+
             if (report.Length == 16 || report.Length == 64)
             {
                 MapGenericFace(report[1], report[2], pressed);
@@ -146,17 +201,16 @@ namespace TenzoraX.Detection
         }
 
         /// <summary>
-        /// Akkustand aus bekannten Report-Layouts (0–100 direkt als Byte).
-        /// 11-Byte-Layout (8BitDo Ultimate 2C / 2 Bluetooth): Byte [10] sinkt über
-        /// die Nutzungsdauer monoton (log-verifiziert: 0x46=70 % → 0x3B=59 % über
-        /// den Tag) – im Gegensatz zu den Bytes [10..13] des 34-Byte-Reports, die
-        /// konstant sind und KEINEN Akku enthalten.
+        /// Erkennt den Eingaberrahmen des Windows-Treibers <c>xinputhid</c>, der zu
+        /// jedem XInput-Pad als HID-Sammlung erscheint: 16 Byte, fester Rahmen
+        /// [2]=0x80, [3]=0xFF, [4]=0x7F und keine Face-Tasten in [1]. Diese Reports
+        /// sind kein 8BitDo-Layout und dürfen nie über den Fallback gedeutet werden.
         /// </summary>
-        public static byte? ReadBattery(byte[] report)
+        internal static bool IsXInputHidFrame(byte[]? report)
         {
-            if (report == null || report.Length != 11) return null;
-            byte v = report[10];
-            return v >= 5 && v <= 100 ? v : null;
+            if (report == null || report.Length != 16) return false;
+            return report[0] == 0x00 && report[1] == 0x00
+                && report[2] == 0x80 && report[3] == 0xFF && report[4] == 0x7F;
         }
 
         /// <summary>8-Bit-Achse mit Mitte bei 0x7F (0x00 = -1, 0xFF = +1).</summary>

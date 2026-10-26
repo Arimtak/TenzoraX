@@ -47,12 +47,98 @@ namespace TenzoraX.Detection
 
         internal static string FormatVidPid(ushort vid, ushort pid) => $"VID_{vid:X4}&PID_{pid:X4}";
 
+        /// <summary>
+        /// Kanonischer Schlüssel einer Geräte-Instanz für Identitätsvergleiche.
+        ///
+        /// Windows liefert dieselbe Instanz je nach Quelle unterschiedlich geschrieben:
+        /// der SetupAPI-Pfad mit Großbuchstaben (`…\9&amp;8581B18&amp;…`), der Raw-Input-Pfad
+        /// klein (`…\9&amp;8581b18&amp;…`), und aus Interface-Pfaden kommt `#` statt `\`.
+        /// Instanz-IDs sind bei Windows grundsätzlich nicht case-sensitiv – ein Vergleich
+        /// mit `==` führt deshalb zu Geister-Geräten (2026-10-26 im Verlauf beobachtet).
+        /// </summary>
+        internal static string NormalizeInstanceKey(string? instanceId)
+        {
+            if (string.IsNullOrWhiteSpace(instanceId)) return "";
+            string key = instanceId.Trim();
+
+            // Interface-Pfade ("\\\\?\\HID#VID_x&PID_y#…") auf die Instanz-ID-Form
+            // bringen: Gerätepfad-Präfix weg, '#' als Trenner zu '\\'.
+            if (key.StartsWith(@"\\?\", StringComparison.Ordinal)) key = key.Substring(4);
+            else if (key.StartsWith(@"\??\", StringComparison.Ordinal)) key = key.Substring(4);
+
+            return key.Replace('#', '\\').ToUpperInvariant();
+        }
+
         /// <summary>Generische Gamepad-Beschreibungen (lokalisiert) erkennen.</summary>
         internal static bool LooksLikeGenericGamepad(string text)
         {
             string t = text.ToLowerInvariant();
             return t.Contains("game controller") || t.Contains("gamecontroller") || t.Contains("gamepad")
                 || t.Contains("joystick") || t.Contains("hid-compliant") || t.Contains("spielsteuerung");
+        }
+
+        /// <summary>
+        /// Treiber-Platzhalter von Windows statt eines Hersteller-Produktnamens
+        /// (z.B. "XINPUT-kompatibles HID-Gerät", "HID-compliant game controller",
+        /// "Wireless Controller"). Aufrufer prüft zusätzlich die VID, damit ein
+        /// wirklich generischer Name eines Fremdherstellers unangetastet bleibt.
+        /// </summary>
+        internal static bool IsDriverPlaceholderName(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return true;
+            string t = text.Trim().ToLowerInvariant();
+            // Exakter Vergleich für "Wireless Controller": so bleibt ein echter
+            // Produktname wie "Xbox Elite Wireless Controller Series 2" erhalten.
+            return t.Contains("xinput") || t.Contains("hid-compliant") || t.Contains("hid-konform")
+                || t.Contains("input device") || t.Contains("eingabeger")
+                || t == "wireless controller" || t == "drahtloscontroller";
+        }
+
+        /// <summary>
+        /// Verständlicher Anzeigename für bekannte Gamepads. Windows meldet für
+        /// XInput-Pads nur den Treibernamen ("XINPUT-kompatibles HID-Gerät" /
+        /// "XINPUT compatible HID device"), Sony-Pads oft nur "Wireless Controller" –
+        /// VID/PID ist dort die einzige verlässliche Quelle. Leer = unbekannt, der
+        /// Aufrufer behält dann seinen Namen.
+        ///
+        /// Aufruf nur für bereits als Gamepad erkannte Geräte: die VIDs decken bei
+        /// denselben Herstellern auch Mäuse, Tastaturen und anderes Zubehör ab.
+        /// Unbekannte PIDs eines bekannten Herstellers bekommen bewusst einen
+        /// neutralen Namen statt gar keinem.
+        /// </summary>
+        internal static string GetKnownControllerName(ushort vid, ushort pid)
+        {
+            switch (vid)
+            {
+                case 0x045E:   // Microsoft
+                    return pid switch
+                    {
+                        0x028E or 0x028F or 0x0291 or 0x0719 => "Xbox 360 Controller",
+                        _ => "Xbox-Controller"
+                    };
+
+                case 0x054C:   // Sony
+                    return pid switch
+                    {
+                        0x0268 => "DualShock 3",
+                        0x05C4 or 0x09CC => "DualShock 4",
+                        0x0CE6 => "DualSense",
+                        0x0DF2 => "DualSense Edge",
+                        _ => "PlayStation-Controller"
+                    };
+
+                case 0x057E:   // Nintendo
+                    return pid switch
+                    {
+                        0x2009 => "Switch Pro Controller",
+                        0x2006 => "Joy-Con (links)",
+                        0x2007 => "Joy-Con (rechts)",
+                        _ => "Nintendo-Controller"
+                    };
+
+                default:
+                    return "";
+            }
         }
 
         internal static string GetKnownVendorName(ushort vid)

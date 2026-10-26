@@ -12,6 +12,7 @@ namespace TenzoraX
         /// <summary>Text-Aktion (inkl. Emojis). Wenn gesetzt, ersetzt sie die Action-Tasten.</summary>
         public string? CurrentActionText { get; private set; }
 
+
         public event Action? CaptureStateChanged;
         public event Action? ComboChanged;
         public event Action? ActionChanged;

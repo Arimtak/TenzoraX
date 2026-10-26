@@ -119,7 +119,7 @@ namespace TenzoraX.Detection
                             ConnectionType = type,
                             FriendlyName = friendly,
                             DeviceDesc = desc,
-                            HardwareIds = GetDeviceRegistryPropertyString(devInfoSet, ref data, SPDRP_HARDWAREID)
+                            HardwareIds = GetDeviceRegistryPropertyMultiString(devInfoSet, ref data, SPDRP_HARDWAREID)
                         };
 
                         if (withDetails)
@@ -408,6 +408,37 @@ namespace TenzoraX.Detection
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Liest eine REG_MULTI_SZ-Eigenschaft (SPDRP_HARDWAREID) vollständig.
+        /// PtrToStringUni endet am ersten NUL-Zeichen – dadurch war nur die erste
+        /// Hardware-ID sichtbar und die Marker "UP:0001_U:0005" bzw.
+        /// "HID_DEVICE_SYSTEM_GAME" wurden nie gefunden. Genau diese Marker tragen
+        /// aber z.B. "XINPUT-kompatible HID-Geräte" und generische Gamepads.
+        /// </summary>
+        private static string GetDeviceRegistryPropertyMultiString(IntPtr devInfoSet, ref SP_DEVINFO_DATA data, uint property)
+        {
+            uint type, required = 0;
+            SetupDiGetDeviceRegistryProperty(devInfoSet, ref data, property, out type, IntPtr.Zero, 0, out required);
+            if (required == 0 || required > 8192) return "";
+            IntPtr buffer = Marshal.AllocHGlobal((int)required);
+            try
+            {
+                if (!SetupDiGetDeviceRegistryProperty(devInfoSet, ref data, property, out type, buffer, required, out _))
+                    return "";
+                var parts = new List<string>();
+                int offset = 0;
+                while (offset < (int)required)
+                {
+                    string? part = Marshal.PtrToStringUni(IntPtr.Add(buffer, offset));
+                    if (string.IsNullOrEmpty(part)) break;
+                    parts.Add(part.Trim());
+                    offset += (part.Length + 1) * sizeof(char);
+                }
+                return string.Join("|", parts);
+            }
+            finally { Marshal.FreeHGlobal(buffer); }
+        }
+
         private static string GetDeviceRegistryPropertyString(IntPtr devInfoSet, ref SP_DEVINFO_DATA data, uint property)
         {
             // Größenabfrage schlägt erwartungsgemäß mit ERROR_INSUFFICIENT_BUFFER fehl
@@ -487,10 +518,8 @@ namespace TenzoraX.Detection
             catch { registryHasValues = false; }
 
             // HardwareID: sprachunabhängige Marker "UP:0001_U:0005"/"UP:0001_U:0004"
-            hwIds = GetDeviceRegistryPropertyString(devInfoSet, ref data, SPDRP_HARDWAREID);
-            if (hwIds.IndexOf("UP:0001_U:0005", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            if (includeJoystickUsage && hwIds.IndexOf("UP:0001_U:0004", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            if (hwIds.IndexOf("HID_DEVICE_SYSTEM_GAME", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            hwIds = GetDeviceRegistryPropertyMultiString(devInfoSet, ref data, SPDRP_HARDWAREID);
+            if (MentionsGamepadUsage(hwIds, includeJoystickUsage)) return true;
 
             // Fallback: lokalisierte Gerätebeschreibung (z.B. "HID-konformer Gamecontroller")
             desc = GetDeviceRegistryPropertyString(devInfoSet, ref data, SPDRP_DEVICEDESC);
@@ -586,8 +615,31 @@ namespace TenzoraX.Detection
         }
 
         /// <summary>Anzeigename: FriendlyName, sonst DeviceDesc, sonst Hersteller-/Generik-Fallback.</summary>
-        private static string GetControllerDisplayName(string friendly, string desc, ushort vid, ushort pid)
+        /// <summary>
+        /// Erkennt Gamepad-Hardware-IDs. Die Liste kommt als ein mit "|" verbundener
+        /// REG_MULTI_SZ-String – die Marker stehen oft erst ab dem zweiten Eintrag
+        /// (z.B. "HID\VID_045E&PID_02FF&IG_00|HID\VID_045E&UP:0001_U:0005|HID_DEVICE_SYSTEM_GAME").
+        /// </summary>
+        internal static bool MentionsGamepadUsage(string hardwareIds, bool includeJoystickUsage)
         {
+            if (string.IsNullOrEmpty(hardwareIds)) return false;
+            if (hardwareIds.IndexOf("UP:0001_U:0005", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (includeJoystickUsage && hardwareIds.IndexOf("UP:0001_U:0004", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            return hardwareIds.IndexOf("HID_DEVICE_SYSTEM_GAME", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        internal static string GetControllerDisplayName(string friendly, string desc, ushort vid, ushort pid)
+        {
+            // Windows liefert für XInput-Pads nur einen Treiber-Platzhalter
+            // ("XINPUT-kompatibles HID-Gerät"). Einen echten Produktnamen würden
+            // wir nie überschreiben – deshalb greift der bekannte Name nur, wenn
+            // nichts Besseres da ist.
+            string known = DeviceHelpers.GetKnownControllerName(vid, pid);
+            bool onlyDriverName = LooksGeneric(friendly) || LooksGeneric(desc)
+                                  || DeviceHelpers.IsDriverPlaceholderName(friendly)
+                                  || DeviceHelpers.IsDriverPlaceholderName(desc);
+            if (!string.IsNullOrEmpty(known) && onlyDriverName) return known;
+
             if (!string.IsNullOrEmpty(friendly) && !LooksGeneric(friendly))
                 return friendly;
             if (!string.IsNullOrEmpty(desc) && !LooksGeneric(desc))

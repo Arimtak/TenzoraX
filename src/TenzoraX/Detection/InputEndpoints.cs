@@ -292,6 +292,103 @@ namespace TenzoraX.Detection
             return result;
         }
 
+        /// <summary>
+        /// True, wenn der Anzeigename nach einer Gamepad-Schnittstelle klingt.
+        ///
+        /// Nur zweite Wahl, aber nötig: Pads im Xbox-Modus melden ihre XInput-Schnittstelle
+        /// unter Microsofts VID („XINPUT-kompatibles HID-Gerät“, VID_045E&amp;PID_02FF),
+        /// während dieselbe physische Einheit als HID-Gamepad unter der Hersteller-VID läuft
+        /// (gemessen: 8BitDo, VID_2DC8). Ein reiner VID/PID-Vergleich findet die
+        /// abgeschaltete Schnittstelle dann nicht.
+        /// </summary>
+        public static bool IsGamepadInterfaceName(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            string t = name!.Trim().ToLowerInvariant();
+            return t.Contains("xinput") || t.Contains("xbox") || t.Contains("gamepad")
+                || t.Contains("game controller") || t.Contains("gamecontroller")
+                || t.Contains("controller") || t.Contains("joystick") || t.Contains("spielsteuerung");
+        }
+
+        /// <summary>
+        /// Sucht die Schnittstelle, die sich gezielt wieder einschalten lässt, wenn die App
+        /// ein Pad listet, Windows es aber nicht führt.
+        ///
+        /// Reihenfolge: erst eine abgeschaltete Schnittstelle mit passender VID/PID (das ist
+        /// sicher dasselbe Gerät), unter mehreren Treffern die Gamepad-Schnittstelle; gibt es
+        /// keinen Treffer, eine abgeschaltete Gamepad-Schnittstelle über den Namen – der
+        /// Fall, in dem dieselbe physische Einheit unter zwei VIDs auftaucht. Sonst null:
+        /// lieber keinen Knopf als einen, der ein fremdes Gerät einschaltet.
+        /// </summary>
+        public static PhysicalDeviceResolver.DeviceStateInfo? SelectRecoveryInterface(
+            IEnumerable<PhysicalDeviceResolver.DeviceStateInfo>? disabled,
+            IEnumerable<string>? vidPids)
+        {
+            if (disabled == null) return null;
+
+            var candidates = new List<PhysicalDeviceResolver.DeviceStateInfo>();
+            foreach (var node in disabled)
+            {
+                if (node == null) continue;
+                if (node.State != PhysicalDeviceResolver.DeviceState.Disabled) continue;
+                if (string.IsNullOrEmpty(node.InstanceId)) continue;
+                candidates.Add(node);
+            }
+            if (candidates.Count == 0) return null;
+
+            var sameDevice = SelectDisabledInterfaces(candidates, vidPids);
+            if (sameDevice.Count > 0) return PreferGamepadInterface(sameDevice);
+
+            var gamepads = candidates.FindAll(n => IsGamepadInterfaceName(n.FriendlyName));
+            return gamepads.Count > 0 ? PreferGamepadInterface(gamepads) : null;
+        }
+
+        /// <summary>Erste Gamepad-Schnittstelle der Liste, sonst der erste Eintrag.</summary>
+        private static PhysicalDeviceResolver.DeviceStateInfo PreferGamepadInterface(
+            List<PhysicalDeviceResolver.DeviceStateInfo> nodes)
+        {
+            foreach (var node in nodes)
+                if (IsGamepadInterfaceName(node.FriendlyName)) return node;
+            return nodes[0];
+        }
+
+        /// <summary>
+        /// Warntext für den Widerspruch „die App listet ein Pad, Windows führt aber gar
+        /// keinen Eingabe-Endpunkt“. Leer, wenn kein Widerspruch besteht.
+        ///
+        /// Hintergrund (gemessen 26.10.2026): War die xinputhid-Schnittstelle eines
+        /// 8BitDo-Pads in Windows deaktiviert, stand das Pad in TenzoraX in der Liste,
+        /// fehlte aber im Windows-Panel, bei Steam und in Spielen – XInput lieferte
+        /// nichts, DirectInput führte nichts. Ohne Hinweis wirkt das wie ein Fehler der App.
+        /// </summary>
+        /// <param name="appControllerCount">Anzahl der von der App gelisteten Controller.</param>
+        /// <param name="occupiedXInputSlots">Belegte XInput-Slots (Windows-Sicht).</param>
+        /// <param name="directInputDevices">Von DirectInput geführte Gamecontroller.</param>
+        /// <param name="disabledInterfaceName">Name einer deaktivierten Schnittstelle des
+        /// Pads, falls bekannt („XINPUT-kompatibles HID-Gerät“).</param>
+        /// <summary>True, wenn der Widerspruch besteht: App listet etwas, Windows nichts.</summary>
+        public static bool IsMismatch(int appControllerCount, int occupiedXInputSlots, int directInputDevices)
+            => appControllerCount > 0 && occupiedXInputSlots <= 0 && directInputDevices <= 0;
+
+        public static string MismatchWarning(
+            int appControllerCount,
+            int occupiedXInputSlots,
+            int directInputDevices,
+            string? disabledInterfaceName = null)
+        {
+            if (!IsMismatch(appControllerCount, occupiedXInputSlots, directInputDevices)) return "";
+
+            string name = string.IsNullOrWhiteSpace(disabledInterfaceName) ? "" : disabledInterfaceName!.Trim();
+            string head = "TenzoraX listet " + appControllerCount +
+                          " Controller, Windows führt aber weder einen XInput-Slot noch ein DirectInput-Gerät.";
+
+            if (name != "")
+                return head + " Die Schnittstelle „" + name + "“ ist in Windows deaktiviert (Code 22) – " +
+                       "im Geräte-Manager aktivieren oder mit Enable-PnpDevice einschalten.";
+
+            return head + " Ursache meist eine deaktivierte Schnittstelle – Details im Diagnosebericht (🔍).";
+        }
+
         /// <summary>Zeilen im Windows-Panel: je DirectInput-Gerät eine, plus je belegtem XInput-Slot eine.</summary>
         public static int PanelRowEstimate(int occupiedXInputSlots, int directInputDevices) =>
             Math.Max(0, occupiedXInputSlots) + Math.Max(0, directInputDevices);
