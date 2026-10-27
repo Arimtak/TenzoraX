@@ -43,12 +43,15 @@ More features:
 - 🎮 **Controller icon in the header** – opens the Windows "Game Controllers" window.
 - **Tray icon** – quick access to the app and current controller status.
 
-## What's new in 1.5.0
+## What's new in 1.5.1
 
-- More reliable controller detection and reconnection across HID, DirectInput, XInput and Raw Input.
-- Automatic recovery when a controller interface stops responding.
-- The Windows "Game Controllers" panel opens safely and no longer leaves hung RunDLL windows.
-- Improved diagnostics and stability fixes.
+- Controller view: buttons now sit exactly on the pad artwork, and the D-pad is drawn as one cross instead of four separate tiles.
+- Xbox/Guide (HOME) button is now detected.
+- New "Toggle (hold key permanently)" option in the mapping editor; held keys are released when the app closes.
+- Cleaner right panel: no tab strip, no scrollbar on the saved-combinations list, and cards use the full width.
+- The "Xbox 360 & HidHide" tab was removed from the window.
+- Default look is now "Shine"; a design chosen under Settings → Design is remembered.
+- Bug fixes and stability improvements.
 
 ## Data
 

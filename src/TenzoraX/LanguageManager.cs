@@ -79,6 +79,9 @@ namespace TenzoraX
         public string Mapping_ActionPlaceholder => this["Mapping_ActionPlaceholder"];
         public string Mapping_NameLabel => this["Mapping_NameLabel"];
         public string Mapping_NameHint => this["Mapping_NameHint"];
+        public string Mapping_ToggleLabel => this["Mapping_ToggleLabel"];
+        public string Mapping_ToggleHint => this["Mapping_ToggleHint"];
+        public string Mapping_ToggleBadge => this["Mapping_ToggleBadge"];
         public string Mapping_TextActionLabel => this["Mapping_TextActionLabel"];
         public string Mapping_TextActionApply => this["Mapping_TextActionApply"];
         public string Mapping_Save => this["Mapping_Save"];
@@ -229,8 +232,6 @@ namespace TenzoraX
         public string Drivers_HeaderTooltipMissing => this["Drivers_HeaderTooltipMissing"];
         public string Drivers_HeaderAllInstalled => this["Drivers_HeaderAllInstalled"];
         public string Drivers_HeaderDownloadFailed => this["Drivers_HeaderDownloadFailed"];
-        public string Live_ButtonsLabel => this["Live_ButtonsLabel"];
-        public string Live_AxesLabel => this["Live_AxesLabel"];
 
         public string Sound_Section => this["Sound_Section"];
         public string Sound_EnableTitle => this["Sound_EnableTitle"];
@@ -297,6 +298,9 @@ namespace TenzoraX
                 ["Mapping_ActionPlaceholder"] = "(empty) e.g. F13",
                 ["Mapping_NameLabel"] = "Name (label):",
                 ["Mapping_NameHint"] = "Shown in the list and notification – never typed. Use the text action below if the combo should actually type text.",
+                ["Mapping_ToggleLabel"] = "Toggle (hold key permanently)",
+                ["Mapping_ToggleHint"] = "First press holds the output keys down, the second press releases them. Applies to key output – text actions are still typed once per press.",
+                ["Mapping_ToggleBadge"] = "Toggle",
                 ["Mapping_TextActionLabel"] = "Text action (type emojis/text instead of keys):",
                 ["Mapping_TextActionApply"] = "Apply",
                 ["Mapping_Save"] = "Save combination",
@@ -464,8 +468,6 @@ namespace TenzoraX
                 ["Drivers_HeaderTooltipMissing"] = "Drivers missing (ViGEmBus: {0}, HidHide: {1}). Click to download and install.",
                 ["Drivers_HeaderAllInstalled"] = "Both drivers (ViGEmBus and HidHide) are already installed.",
                 ["Drivers_HeaderDownloadFailed"] = "Download failed: {0}. Please check your internet connection and try again.",
-                ["Live_ButtonsLabel"] = "Buttons:",
-                ["Live_AxesLabel"] = "Sticks:",
 
                 ["Sound_Section"] = "🔊 SOUND FEEDBACK",
                 ["Sound_EnableTitle"] = "Enable sound feedback",
@@ -531,6 +533,9 @@ namespace TenzoraX
                 ["Mapping_ActionPlaceholder"] = "(leer) z.B. F13",
                 ["Mapping_NameLabel"] = "Name (Beschriftung):",
                 ["Mapping_NameHint"] = "Erscheint in der Liste und in der Benachrichtigung – wird NIE getippt. Die Text-Aktion darunter nur nutzen, wenn die Kombination wirklich Text tippen soll.",
+                ["Mapping_ToggleLabel"] = "Umschalter (Taste dauerhaft halten)",
+                ["Mapping_ToggleHint"] = "Erster Druck hält die Ausgabe-Tasten gedrückt, zweiter Druck lässt sie wieder los. Gilt für die Tasten-Ausgabe – Text-Aktionen tippen weiterhin einmal pro Druck.",
+                ["Mapping_ToggleBadge"] = "Umschalter",
                 ["Mapping_TextActionLabel"] = "Text-Aktion (Emojis/Text statt Tasten):",
                 ["Mapping_TextActionApply"] = "Übernehmen",
                 ["Mapping_Save"] = "Kombination speichern",
@@ -698,8 +703,6 @@ namespace TenzoraX
                 ["Drivers_HeaderTooltipMissing"] = "Treiber fehlen (ViGEmBus: {0}, HidHide: {1}). Klick zum Herunterladen und Installieren.",
                 ["Drivers_HeaderAllInstalled"] = "Beide Treiber (ViGEmBus und HidHide) sind bereits installiert.",
                 ["Drivers_HeaderDownloadFailed"] = "Download fehlgeschlagen: {0}. Bitte Internetverbindung prüfen und erneut versuchen.",
-                ["Live_ButtonsLabel"] = "Tasten:",
-                ["Live_AxesLabel"] = "Sticks:",
 
                 ["Sound_Section"] = "🔊 SOUNDFEEDBACK",
                 ["Sound_EnableTitle"] = "Soundfeedback aktivieren",

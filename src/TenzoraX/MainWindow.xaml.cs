@@ -29,6 +29,13 @@ namespace TenzoraX
         public string LastActiveProfile { get; set; } = "Default";
         public Dictionary<string, double> ButtonPositions { get; set; } = new();
         public Dictionary<string, double> RelativeButtonPositions { get; set; } = new();
+
+        /// <summary>
+        /// Fassung der gespeicherten Tastenanordnung (siehe MainWindow.CurrentButtonLayoutVersion).
+        /// Fehlt der Wert in einer älteren config.json, gilt 0 = vor der ersten Fassung.
+        /// </summary>
+        public int ButtonLayoutVersion { get; set; } = 0;
+
         public bool EditMode { get; set; } = false;
         public string EditModeType { get; set; } = "image";
         public double L2_Left { get; set; } = 120;
@@ -73,7 +80,14 @@ namespace TenzoraX
         public string ControllerReselectMode { get; set; } = "first";
 
         /// <summary>Oberflächen-Stil: "flat" (flach), "3d" (Licht, Kanten, Tiefe) oder "shine" (3D mit Glanzkante).</summary>
-        public string UiTheme { get; set; } = Theme3D.ThreeD;
+        public string UiTheme { get; set; } = Theme3D.Default;
+
+        /// <summary>
+        /// true, sobald der Stil in den Einstellungen bewusst gewählt wurde. Nur dann gilt
+        /// der gespeicherte Wert beim Start; sonst greift der Standard (siehe
+        /// <see cref="Theme3D.ThemeFromConfigJson"/>).
+        /// </summary>
+        public bool UiThemeUserChoice { get; set; } = false;
 
         /// <summary>Ob der Controller-Bereich eingeklappt ist, damit die Tastatur den Platz bekommt.</summary>
         public bool GamepadCollapsed { get; set; } = false;
@@ -234,7 +248,7 @@ namespace TenzoraX
             }
             catch
             {
-                // Nicht lesbar → Standard (3D), LoadSettings versucht es später erneut.
+                // Nicht lesbar → Standard (Shine), LoadSettings versucht es später erneut.
             }
             Theme3D.Apply(Theme3D.ThemeFromConfigJson(json));
         }
@@ -337,7 +351,8 @@ namespace TenzoraX
                     }
                 }
 
-                TxtVersionHeader.Text = $"v{AppVersion.Current}";
+                // Version steht bewusst nur noch in der Windows-Titelleiste (Taskleiste/
+                // Alt+Tab) – im App-Kopf neben dem Controller-Symbol war sie doppelt.
                 Title = $"TenzoraX v{AppVersion.Current}";
 
                 // Cleanup: remove any leftover .old.exe from old update versions
@@ -376,7 +391,7 @@ namespace TenzoraX
             InitVigemHidhideUi();
             ControllerManager.Instance.ReselectMode = _settings.ControllerReselectMode;
             StartHidHideRestoreTimer();
-            StartLiveInputTimer();
+            StartOutputIndicatorTimer();
             App.LogApp("Controller-System initialisiert");
 
             // Hinweis erst nach dem ersten Rendering zeigen (nicht beim Start aufblitzen lassen).
@@ -494,7 +509,7 @@ namespace TenzoraX
 
             double scale = _settings.ControllerScale;
             ImgController.Width = 400 * scale;
-            ImgController.Height = 230 * scale;
+            ImgController.Height = ControllerImageHeight(scale);
 
             Canvas.SetLeft(ImgController, _settings.ControllerLeft);
             Canvas.SetTop(ImgController, _settings.ControllerTop);
@@ -638,7 +653,7 @@ namespace TenzoraX
             if (double.IsNaN(imgW) || double.IsNaN(imgH) || imgW <= 0 || imgH <= 0)
             {
                 imgW = 400 * _settings.ControllerScale;
-                imgH = 230 * _settings.ControllerScale;
+                imgH = ControllerImageHeight(_settings.ControllerScale);
             }
             if (imgW <= 0 || imgH <= 0) return;
 
@@ -762,7 +777,7 @@ namespace TenzoraX
                 _settings.ControllerScale = newScale;
                 
                 ImgController.Width  = 400 * _settings.ControllerScale;
-                ImgController.Height = 230 * _settings.ControllerScale;
+                ImgController.Height = ControllerImageHeight(_settings.ControllerScale);
 
                 // After resize, clamp position so at least 40px stays visible
                 double minVisible = 40;
@@ -879,34 +894,27 @@ namespace TenzoraX
                 }
                 else
                 {
+                    byte a = imgMode ? (byte)70 : (byte)100;
+                    btn.Opacity = imgMode ? 0.6 : 0.85;
+                    btn.IsHitTestVisible = !imgMode;
+                    btn.Foreground = white;
+                    btn.FontWeight = FontWeights.Bold;
                     btn.BorderThickness = new Thickness(1);
                     btn.BorderBrush = muted;
-                    btn.FontWeight = FontWeights.Bold;
 
-                    if (imgMode)
+                    if (IsDpadKey(key))
                     {
-                        btn.Opacity = 0.6;
-                        btn.IsHitTestVisible = false;
-                        btn.Foreground = white;
-                        byte a = 70;
-                        if (key == "A") btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 20, 44, 30));
-                        else if (key == "B") btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 47, 20, 24));
-                        else if (key == "X") btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 18, 32, 48));
-                        else if (key == "Y") btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 42, 36, 21));
-                        else btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 26, 26, 36));
+                        // Ein D-Pad statt vier Kästchen: die Pfeile liegen ohne eigene Fläche
+                        // auf dem hellgrauen Kreuz der Vorlage.
+                        btn.Background = System.Windows.Media.Brushes.Transparent;
+                        btn.BorderThickness = new Thickness(0);
+                        btn.BorderBrush = System.Windows.Media.Brushes.Transparent;
                     }
-                    else
-                    {
-                        btn.Opacity = 0.85;
-                        btn.IsHitTestVisible = true;
-                        btn.Foreground = white;
-                        byte a = 100;
-                        if (key == "A") btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 20, 44, 30));
-                        else if (key == "B") btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 47, 20, 24));
-                        else if (key == "X") btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 18, 32, 48));
-                        else if (key == "Y") btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 42, 36, 21));
-                        else btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 26, 26, 36));
-                    }
+                    else if (key == "A") btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 20, 44, 30));
+                    else if (key == "B") btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 47, 20, 24));
+                    else if (key == "X") btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 18, 32, 48));
+                    else if (key == "Y") btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 42, 36, 21));
+                    else btn.Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(a, 26, 26, 36));
                 }
             }
         }
@@ -926,6 +934,7 @@ namespace TenzoraX
             _gamepadButtonsUi["R3"] = Btn_R3;
             _gamepadButtonsUi["SELECT"] = Btn_SELECT;
             _gamepadButtonsUi["START"] = Btn_START;
+            _gamepadButtonsUi["HOME"] = Btn_HOME;
             _gamepadButtonsUi["DPAD_UP"] = Btn_DPAD_UP;
             _gamepadButtonsUi["DPAD_DOWN"] = Btn_DPAD_DOWN;
             _gamepadButtonsUi["DPAD_LEFT"] = Btn_DPAD_LEFT;
@@ -1141,7 +1150,6 @@ namespace TenzoraX
 
             SplitterRow.Height = collapsed ? new GridLength(0) : new GridLength(8);
             SplitterGamepad.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
-            GamepadLiveRow.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
             GamepadSurface.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
 
             BtnToggleGamepad.Content = collapsed ? "▸" : "▾";
@@ -1221,8 +1229,16 @@ namespace TenzoraX
                         if (!_lastRenderedButtons.Contains(btnKey))
                         {
                             _lastRenderedButtons.Add(btnKey);
-                            btn.Background = System.Windows.Media.Brushes.Cyan;
-                            btn.BorderBrush = System.Windows.Media.Brushes.White;
+                            if (IsDpadKey(btnKey))
+                            {
+                                // Der Pfeil selbst leuchtet – kein Kästchen über dem Kreuz.
+                                btn.Foreground = System.Windows.Media.Brushes.Cyan;
+                            }
+                            else
+                            {
+                                btn.Background = System.Windows.Media.Brushes.Cyan;
+                                btn.BorderBrush = System.Windows.Media.Brushes.White;
+                            }
                         }
                         if (!_physicallyHeldButtons.Contains(btnKey))
                         {
@@ -1238,13 +1254,20 @@ namespace TenzoraX
                         if (_lastRenderedButtons.Contains(btnKey))
                         {
                             _lastRenderedButtons.Remove(btnKey);
-                            if (btnKey == "A") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(20, 44, 30));
-                            else if (btnKey == "B") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(47, 20, 24));
-                            else if (btnKey == "X") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(18, 32, 48));
-                            else if (btnKey == "Y") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(42, 36, 21));
-                            else btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(26, 26, 36));
+                            if (IsDpadKey(btnKey))
+                            {
+                                btn.Foreground = System.Windows.Media.Brushes.White;
+                            }
+                            else
+                            {
+                                if (btnKey == "A") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(20, 44, 30));
+                                else if (btnKey == "B") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(47, 20, 24));
+                                else if (btnKey == "X") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(18, 32, 48));
+                                else if (btnKey == "Y") btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(42, 36, 21));
+                                else btn.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(26, 26, 36));
 
-                            btn.BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(45, 45, 61));
+                                btn.BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(45, 45, 61));
+                            }
                         }
                         _physicallyHeldButtons.Remove(btnKey);
                     }
@@ -1644,6 +1667,7 @@ namespace TenzoraX
                 if (string.IsNullOrEmpty(_capture.ActionDisplay))
                     TxtSelectedAction.Text = Lang.Mapping_ActionPlaceholder;
                 TxtMappingName.Text = mapping.Name ?? "";
+                ChkMappingToggle.IsChecked = mapping.Toggle;
                 // Laufende Aufnahme beenden + Button zurücksetzen
                 BtnRecord.Content = Lang.Mapping_Record;
                 BtnRecord.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129));
@@ -1667,6 +1691,7 @@ namespace TenzoraX
 
             // Name (Beschriftung) ist optional und wird nie getippt.
             string? name = string.IsNullOrWhiteSpace(TxtMappingName.Text) ? null : TxtMappingName.Text.Trim();
+            bool toggle = ChkMappingToggle.IsChecked == true;
 
             var existing = ProfileManager.Instance.ActiveProfile.Mappings.FirstOrDefault(m => m.Combo.SequenceEqual(_capture.CurrentCombo));
             if (existing != null)
@@ -1674,6 +1699,7 @@ namespace TenzoraX
                 existing.Action = new List<string>(_capture.CurrentAction);
                 existing.Text = _capture.CurrentActionText;
                 existing.Name = name;
+                existing.Toggle = toggle;
             }
             else
                 ProfileManager.Instance.AddMapping(new Mapping
@@ -1681,7 +1707,8 @@ namespace TenzoraX
                     Combo = new List<string>(_capture.CurrentCombo),
                     Action = new List<string>(_capture.CurrentAction),
                     Text = _capture.CurrentActionText,
-                    Name = name
+                    Name = name,
+                    Toggle = toggle
                 });
 
             ProfileManager.Instance.SaveActiveProfile();
@@ -1689,6 +1716,7 @@ namespace TenzoraX
             TxtSelectedCombo.Text = Lang.Mapping_ComboPlaceholder;
             TxtSelectedAction.Text = Lang.Mapping_ActionPlaceholder;
             TxtMappingName.Text = "";
+            ChkMappingToggle.IsChecked = false;
             BtnRecord.Content = Lang.Mapping_Record;
             BtnRecord.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129));
             BtnRecord.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(15, 44, 58));
@@ -1730,6 +1758,7 @@ namespace TenzoraX
                 TxtSelectedCombo.Text = Lang.Mapping_ComboPlaceholder;
                 TxtSelectedAction.Text = Lang.Mapping_ActionPlaceholder;
                 TxtMappingName.Text = "";
+                ChkMappingToggle.IsChecked = false;
                 BtnRecord.Content = Lang.Mapping_StopRecord;
                 BtnRecord.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));
                 BtnRecord.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(47, 20, 24));
@@ -1771,12 +1800,31 @@ namespace TenzoraX
             }
 
             // Design-Stil anwenden, bevor das Fenster zum ersten Mal gezeichnet wird.
-            Theme3D.Apply(_settings.UiTheme);
+            // Ohne bewusste Wahl des Nutzers gilt der Standard (Shine) – auch wenn in einer
+            // älteren config.json noch das damalige "3d" steht. Gewählter Stil bleibt gewählt.
+            string startTheme = _settings.UiThemeUserChoice
+                ? Theme3D.Normalize(_settings.UiTheme)
+                : Theme3D.Default;
+            _settings.UiTheme = startTheme;
+            Theme3D.Apply(startTheme);
 
             if (_settings.RelativeButtonPositions.Count == 0)
             {
                 SetDefaultRelativePositions();
+                _settings.ButtonLayoutVersion = CurrentButtonLayoutVersion;
                 SaveSettings();
+            }
+            else if (NeedsLayoutUpgrade(_settings.ButtonLayoutVersion, _settings.RelativeButtonPositions.Count > 0))
+            {
+                // Migration: Die gespeicherte Anordnung stammt aus einer älteren Layout-Fassung
+                // (geschätzte Werte samt falschem Seitenverhältnis, oder ohne HOME im
+                // Vorgabe-Satz). Einmalig auf die gemessene Vorgabe setzen – verschieben lässt
+                // sich danach alles wieder frei (oder über „Zurücksetzen“ erneut).
+                int alteFassung = _settings.ButtonLayoutVersion;
+                SetDefaultRelativePositions();
+                _settings.ButtonLayoutVersion = CurrentButtonLayoutVersion;
+                SaveSettings();
+                App.LogApp($"Controller-Tasten: gespeicherte Anordnung aus Layout-Fassung {alteFassung} – auf die gemessene Vorgabe gesetzt (Fassung {CurrentButtonLayoutVersion}).");
             }
 
             // Xbox-Spiegelung wird nie persistiert – immer deaktiviert beim Start.
@@ -1784,29 +1832,111 @@ namespace TenzoraX
 
         }
 
+        /// <summary>
+        /// Tastennamen der Controller-Oberfläche – dieselben Namen, die Eingabe,
+        /// Aufzeichnung und Kombinationen benutzen (siehe <c>_gamepadButtonsUi</c>).
+        /// </summary>
+        internal static readonly string[] GamepadButtonKeys =
+        {
+            "A", "B", "X", "Y", "L1", "R1", "L2", "R2", "L3", "R3",
+            "SELECT", "START", "HOME",
+            "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT"
+        };
+
+        /// <summary>
+        /// Höhe des Controller-Bildes bei gegebener Skalierung, aus dem Seitenverhältnis
+        /// der geladenen Datei. Vorher standen hier feste 230 DIP: das eingebaute Bild ist
+        /// aber 709x491 (1,444) statt 400:230 (1,739), „Uniform“ legte es also mit Rändern
+        /// in den Rahmen – und die in Bildanteilen gespeicherten Tastenpositionen saßen
+        /// neben Sticks und Tasten. Vorgabe bleibt das eingebaute Bild (400x277).
+        /// </summary>
+        private double ControllerImageHeight(double scale)
+        {
+            double aspect = 709.0 / 491.0;
+            if (ImgController.Source is BitmapSource bmp && bmp.PixelWidth > 0 && bmp.PixelHeight > 0)
+                aspect = bmp.PixelWidth / (double)bmp.PixelHeight;
+            return 400.0 * scale / aspect;
+        }
+
+        /// <summary>
+        /// Fassung der Vorgabe-Anordnung. Bei jeder Änderung der gemessenen Vorgabe erhöhen:
+        /// gespeicherte Anordnungen älterer Fassungen werden beim Start einmalig ersetzt.
+        /// 2 = am Bild gemessen (709x491); Vorgänger 1 = geschätzte Werte, mit 400x230 gerechnet.
+        /// 3 = D-Pad als kompaktes Pfeilkreuz ohne eigene Kacheln auf dem Plus der Vorlage.
+        /// </summary>
+        internal const int CurrentButtonLayoutVersion = 3;
+
+        /// <summary>
+        /// Gehört der Tastename zum D-Pad? Dessen vier Pfeile haben bewusst keine eigene
+        /// Fläche: sie liegen als ein Kreuz auf dem hellgrauen Plus der Vorlage (ein D-Pad,
+        /// nicht vier Kästchen) und leuchten beim Drücken selbst auf.
+        /// </summary>
+        internal static bool IsDpadKey(string key)
+            => key == "DPAD_UP" || key == "DPAD_DOWN" || key == "DPAD_LEFT" || key == "DPAD_RIGHT";
+
+        /// <summary>
+        /// Muss eine gespeicherte Anordnung einmalig durch die aktuelle Vorgabe ersetzt werden?
+        /// Ja, wenn Positionen gespeichert sind und sie aus einer älteren Layout-Fassung stammen.
+        ///
+        /// Anlass (an einem echten Profil gemessen): Die Vorgängerfassung enthielt HOME bereits,
+        /// aber geschätzt (0,5130/0,1029 statt 0,4410/0,2369) und mit falschem Seitenverhältnis
+        /// gerechnet. Eine Prüfung auf „HOME fehlt“ erkannte diesen Fall nicht – die alte
+        /// Anordnung blieb sichtbar. Jetzt entscheidet allein die Fassungsnummer.
+        /// </summary>
+        internal static bool NeedsLayoutUpgrade(int storedVersion, bool hasStoredPositions)
+            => hasStoredPositions && storedVersion < CurrentButtonLayoutVersion;
+
+        /// <summary>
+        /// Vorgabe-Anordnung der Tasten auf dem Controller-Bild, als Anteil der Bildbreite
+        /// und -höhe (linke obere Ecke der jeweiligen Taste).
+        ///
+        /// Die Werte sind am eingebauten Bild gemessen (709x491 Pixel, Xbox-360-Aufnahme):
+        /// Gesichtstasten als Raute um (566|133) mit Radius 56, linker Stick (154|127),
+        /// rechter Stick (465|256), D-Pad (249|257), Xbox-Logo (357|134). HOME sitzt genau
+        /// auf dem Logo, SELECT und START flankieren es wie Back/Menu am echten Pad;
+        /// L1/L2 und R1/R2 liegen spiegelgleich darüber, oberhalb des Pads.
+        ///
+        /// Wechselt das Bild, gehören diese Werte neu gemessen (Farberkennung im PNG,
+        /// Hilfsskript und Messwerte stehen in knowledge.md).
+        /// </summary>
+        internal static Dictionary<string, double> DefaultRelativePositions()
+        {
+            return new Dictionary<string, double>
+            {
+                // Trigger (weiter außen) und Bumper, oberhalb des Pads.
+                ["L2_X"] = 0.1698, ["L2_Y"] = -0.0750,
+                ["R2_X"] = 0.6747, ["R2_Y"] = -0.0750,
+                ["L1_X"] = 0.1698, ["L1_Y"] = 0.0177,
+                ["R1_X"] = 0.6747, ["R1_Y"] = 0.0177,
+
+                // D-Pad: EIN kompaktes Pfeilkreuz auf dem hellgrauen Plus der Vorlage.
+                // Plus-Mitte (249|257) im Bild = (0,3512|0,5234); Armradius 14 DIP bei 24 DIP
+                // Pfeilfläche → Kreuz 52 DIP breit, das Plus misst 119 px = 67 DIP.
+                ["DPAD_UP_X"] = 0.3212, ["DPAD_UP_Y"] = 0.4296,
+                ["DPAD_DOWN_X"] = 0.3212, ["DPAD_DOWN_Y"] = 0.5306,
+                ["DPAD_LEFT_X"] = 0.2862, ["DPAD_LEFT_Y"] = 0.4801,
+                ["DPAD_RIGHT_X"] = 0.3562, ["DPAD_RIGHT_Y"] = 0.4801,
+
+                // Mitte: HOME auf dem Logo, SELECT/START links und rechts davon.
+                ["HOME_X"] = 0.4410, ["HOME_Y"] = 0.2369,
+                ["SELECT_X"] = 0.3212, ["SELECT_Y"] = 0.2369,
+                ["START_X"] = 0.5609, ["START_Y"] = 0.2369,
+
+                // Stick-Ringe.
+                ["L3_X"] = 0.1547, ["L3_Y"] = 0.1684,
+                ["R3_X"] = 0.5934, ["R3_Y"] = 0.4312,
+
+                // Gesichtstasten als Raute.
+                ["Y_X"] = 0.7683, ["Y_Y"] = 0.1134,
+                ["X_X"] = 0.6893, ["X_Y"] = 0.2275,
+                ["B_X"] = 0.8472, ["B_Y"] = 0.2275,
+                ["A_X"] = 0.7683, ["A_Y"] = 0.3415,
+            };
+        }
+
         private void SetDefaultRelativePositions()
         {
-            // Default positions matching the reference controller image (image at 50,20, size 400x230)
-            var defaults = new Dictionary<string, double>
-            {
-                ["L2_X"] = 0.209, ["L2_Y"] = -0.151,
-                ["R2_X"] = 0.799, ["R2_Y"] = -0.151,
-                ["L1_X"] = 0.215, ["L1_Y"] = -0.058,
-                ["R1_X"] = 0.797, ["R1_Y"] = -0.052,
-                ["DPAD_UP_X"] = 0.422, ["DPAD_UP_Y"] = 0.381,
-                ["DPAD_LEFT_X"] = 0.359, ["DPAD_LEFT_Y"] = 0.454,
-                ["DPAD_RIGHT_X"] = 0.476, ["DPAD_RIGHT_Y"] = 0.468,
-                ["DPAD_DOWN_X"] = 0.409, ["DPAD_DOWN_Y"] = 0.567,
-                ["SELECT_X"] = 0.446, ["SELECT_Y"] = 0.212,
-                ["START_X"] = 0.591, ["START_Y"] = 0.212,
-                ["L3_X"] = 0.240, ["L3_Y"] = 0.156,
-                ["R3_X"] = 0.678, ["R3_Y"] = 0.410,
-                ["Y_X"] = 0.871, ["Y_Y"] = 0.100,
-                ["X_X"] = 0.787, ["X_Y"] = 0.201,
-                ["B_X"] = 0.947, ["B_Y"] = 0.228,
-                ["A_X"] = 0.865, ["A_Y"] = 0.341,
-            };
-            foreach (var kvp in defaults)
+            foreach (var kvp in DefaultRelativePositions())
                 _settings.RelativeButtonPositions[kvp.Key] = kvp.Value;
         }
 
@@ -1815,6 +1945,7 @@ namespace TenzoraX
             _settings.RelativeButtonPositions.Clear();
             _settings.ButtonPositions.Clear();
             SetDefaultRelativePositions();
+            _settings.ButtonLayoutVersion = CurrentButtonLayoutVersion;
             SaveSettings();
             ReapplyButtonPositions();
         }
@@ -2450,48 +2581,90 @@ namespace TenzoraX
         /// physische Gamepad automatisch wieder versteckt, sobald ein Controller da ist
         /// (nach Neustart/Update ist sonst nur die Spiegelung, aber nicht das Verstecken aktiv).
         /// </summary>
+        /// <summary>Ein Tastenknopf des Tastaturfelds mit dem Namen, der in Mappings steht.</summary>
+        private sealed class KeyboardKeyUi
+        {
+            public System.Windows.Controls.Button Button = null!;
+            public string Key = "";
+            public bool Lit;
+        }
+
+        private readonly List<KeyboardKeyUi> _keyboardKeys = new();
+
+        /// <summary>Grün = das Programm hält diese Taste gerade (Kombination bzw. Umschalter).</summary>
+        private static readonly System.Windows.Media.SolidColorBrush OutputActiveBrush =
+            new(System.Windows.Media.Color.FromRgb(16, 185, 129));
+
+        private static readonly System.Windows.Media.SolidColorBrush OutputActiveTextBrush =
+            new(System.Windows.Media.Color.FromRgb(6, 32, 24));
+
         /// <summary>
-        /// Live-Eingabe-Anzeige im Hauptfenster: aktualisiert ~5×/Sekunde die
-        /// Tasten-/Achsen-Werte des aktiven Controllers (liest nur, blockiert nie).
+        /// Rückmeldung im Tastaturfeld: Tasten, die das Programm gerade ausgibt, leuchten
+        /// grün. Fragt nur ab – die Ausgabe selbst läuft unabhängig davon auf dem Poll-Thread.
         /// </summary>
-        private void StartLiveInputTimer()
+        private void StartOutputIndicatorTimer()
         {
             var timer = new System.Windows.Threading.DispatcherTimer
             {
-                Interval = TimeSpan.FromMilliseconds(200)
+                Interval = TimeSpan.FromMilliseconds(150)
             };
-            timer.Tick += (s, e) =>
+            timer.Tick += (s, e) => UpdateOutputIndicator();
+            timer.Start();
+        }
+
+        private void UpdateOutputIndicator()
+        {
+            // Erst nach dem ersten Layout sammeln: Vor dem Rendern gibt es keinen
+            // sichtbaren Baum und damit keine Knöpfe zu finden.
+            if (_keyboardKeys.Count == 0)
             {
-                var cm = ControllerManager.Instance;
-                string buttons = cm.LastPressedSummary;
-                string axes = cm.LastAxesSummary;
+                CollectKeyboardKeys();
+                if (_keyboardKeys.Count == 0) return;
+            }
 
-                bool active = !string.IsNullOrEmpty(buttons)
-                    || (cm.LastSourceInputAtUtc != DateTime.MinValue
-                        && (DateTime.UtcNow - cm.LastSourceInputAtUtc).TotalMilliseconds < 500);
+            var active = ProfileManager.Instance.ActiveOutputKeys;
+            foreach (var entry in _keyboardKeys)
+            {
+                bool on = active.Contains(entry.Key);
+                if (on == entry.Lit) continue;
 
-                TxtLiveButtons.Text = LanguageManager.Instance.Live_ButtonsLabel + " "
-                    + (string.IsNullOrEmpty(buttons) ? "—" : buttons);
-                TxtLiveAxes.Text = LanguageManager.Instance.Live_AxesLabel + " "
-                    + (string.IsNullOrEmpty(axes) ? "—" : axes);
-
-                // Grün = Eingabe kommt gerade an, grau = Leerlauf.
-                var color = active
-                    ? System.Windows.Media.Color.FromRgb(16, 185, 129)
-                    : System.Windows.Media.Color.FromRgb(74, 74, 74);
-                LiveActivityDot.Fill = new System.Windows.Media.SolidColorBrush(color);
-                if (active)
+                entry.Lit = on;
+                if (on)
                 {
-                    TxtLiveButtons.Foreground = System.Windows.Media.Brushes.White;
-                    TxtLiveAxes.Foreground = System.Windows.Media.Brushes.White;
+                    entry.Button.Background = OutputActiveBrush;
+                    entry.Button.Foreground = OutputActiveTextBrush;
+                    entry.Button.BorderBrush = System.Windows.Media.Brushes.White;
                 }
                 else
                 {
-                    TxtLiveButtons.Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush");
-                    TxtLiveAxes.Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush");
+                    // Lokale Werte entfernen → die Werte aus KeyBtnStyle gelten wieder.
+                    entry.Button.ClearValue(System.Windows.Controls.Control.BackgroundProperty);
+                    entry.Button.ClearValue(System.Windows.Controls.Control.ForegroundProperty);
+                    entry.Button.ClearValue(System.Windows.Controls.Control.BorderBrushProperty);
                 }
-            };
-            timer.Start();
+            }
+        }
+
+        private void CollectKeyboardKeys()
+        {
+            foreach (var button in FindVisualChildren<System.Windows.Controls.Button>(KeyboardPanel))
+            {
+                string key = (button.Tag as string) ?? (button.Content as string) ?? "";
+                if (string.IsNullOrWhiteSpace(key)) continue;
+                _keyboardKeys.Add(new KeyboardKeyUi { Button = button, Key = key });
+            }
+        }
+
+        private static IEnumerable<T> FindVisualChildren<T>(System.Windows.DependencyObject root)
+            where T : System.Windows.DependencyObject
+        {
+            int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+            for (int i = 0; i < count; i++)
+            {
+                var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+                if (child is T typed) yield return typed;
+                foreach (var nested in FindVisualChildren<T>(child)) yield return nested;
+            }
         }
 
         private void StartHidHideRestoreTimer()
@@ -2674,16 +2847,6 @@ namespace TenzoraX
                     }
                 }));
             });
-        }
-
-        private void TabsRightPanel_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            // Beim Wechsel auf den Controller-Tab Status frisch anzeigen.
-            if (TabsRightPanel.SelectedItem == TabController)
-            {
-                UpdateVigemStatusMain();
-                UpdateHidhideStatusMain();
-            }
         }
 
         private void ChkEditMode_Checked(object sender, RoutedEventArgs e)

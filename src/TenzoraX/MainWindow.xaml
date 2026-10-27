@@ -176,22 +176,20 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="TenzoraX" FontSize="13" FontWeight="Bold" Foreground="#FFFFFF" VerticalAlignment="Center"/>
-                <TextBlock x:Name="TxtVersionHeader" Grid.Column="1" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                 <!-- Klickbares Controller-Icon: öffnet das Windows-Fenster "Game Controller"
                      (joy.cpl) mit allen installierten Controllern – dort lassen sich die
                      Controller testen und konfigurieren. -->
-                <Button x:Name="BtnControllerHistoryHeader" Grid.Column="2" Click="BtnOpenGameControllersMain_Click" Width="28" Height="24" Padding="0" Background="Transparent" BorderThickness="0" Cursor="Hand" ToolTip="{Binding Vigem_OpenControllers}">
+                <Button x:Name="BtnControllerHistoryHeader" Grid.Column="1" Click="BtnOpenGameControllersMain_Click" Width="28" Height="24" Padding="0" Background="Transparent" BorderThickness="0" Cursor="Hand" ToolTip="{Binding Vigem_OpenControllers}">
                     <Image Source="pack://application:,,,/assets/icons/video-game-gamepad-icon_ico_32x32.ico" Width="18" Height="18" Stretch="Uniform"/>
                 </Button>
                 <!-- Treiber-Status-Licht: grün = ViGEmBus + HidHide installiert, rot = fehlen.
                      Klick: fehlende Treiber herunterladen und installieren. -->
-                <Button x:Name="BtnDriversHeader" Grid.Column="3" Click="BtnDriversHeader_Click" Width="28" Height="24" Padding="0" Background="Transparent" BorderThickness="0" Cursor="Hand" ToolTip="{Binding Drivers_HeaderTooltip}">
+                <Button x:Name="BtnDriversHeader" Grid.Column="2" Click="BtnDriversHeader_Click" Width="28" Height="24" Padding="0" Background="Transparent" BorderThickness="0" Cursor="Hand" ToolTip="{Binding Drivers_HeaderTooltip}">
                     <Ellipse x:Name="DriversStatusDotHeader" Width="16" Height="16" Fill="#64748B" Stroke="{StaticResource AccentBrush}" StrokeThickness="1.5"/>
                 </Button>
-                <Button x:Name="BtnSettings" Grid.Column="4" Content="⚙" Click="BtnSettings_Click" Width="28" Height="24" Padding="0" FontSize="14" Background="Transparent" BorderThickness="0" Foreground="{StaticResource MutedTextBrush}" Cursor="Hand"/>
+                <Button x:Name="BtnSettings" Grid.Column="3" Content="⚙" Click="BtnSettings_Click" Width="28" Height="24" Padding="0" FontSize="14" Background="Transparent" BorderThickness="0" Foreground="{StaticResource MutedTextBrush}" Cursor="Hand"/>
             </Grid>
         </ContentControl>
 
@@ -255,55 +253,57 @@
                         </Border>
                     </Grid>
 
-                    <!-- Live-Eingabe-Anzeige: zeigt in Echtzeit, welche Tasten/Achsen
-                         gerade vom aktiven Controller gelesen werden (ohne Diagnose). -->
-                    <StackPanel x:Name="GamepadLiveRow" Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,6">
-                        <Ellipse x:Name="LiveActivityDot" Width="8" Height="8" Fill="#4A4A4A" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBlock x:Name="TxtLiveButtons" Foreground="{StaticResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" Text="—"/>
-                        <TextBlock x:Name="TxtLiveAxes" Foreground="{StaticResource MutedTextBrush}" FontSize="10" VerticalAlignment="Center" Margin="14,0,0,0" Text="—"/>
-                    </StackPanel>
-
                     <!-- Gamepad Visual Interface with Background Image -->
                     <Border x:Name="GamepadSurface" Grid.Row="2" Background="{DynamicResource SurfaceSunkenBrush}" CornerRadius="8" BorderBrush="{DynamicResource BevelInsetBrush}" BorderThickness="1">
                         <Canvas x:Name="CanvasGamepad" ClipToBounds="True" Background="Transparent" MouseDown="CanvasGamepad_MouseDown" KeyDown="CanvasGamepad_KeyDown" Focusable="True">
                             <!-- Controller Background Image -->
                             <Image x:Name="ImgController" Source="pack://application:,,,/assets/icons/xbox-360.png" Stretch="Uniform"/>
                             
+                            <!-- Die Koordinaten hier sind die Ausgangslage (Bild bei 50,20 in 400x277);
+                                 beim Laden setzt die App die in Bildanteilen gespeicherten Vorgabewerte
+                                 (siehe MainWindow.DefaultRelativePositions). L1/L2 und R1/R2 liegen
+                                 bewusst außerhalb des Bildes, oberhalb des Pads. -->
+
                             <!-- L2 & R2 (Triggers - oben) - gleiche Größe wie L1/R1 -->
-                            <Button x:Name="Btn_L2" Content="L2" Style="{StaticResource CircularBtnStyle}" Width="65" Height="24" Canvas.Left="118" Canvas.Top="13" Click="GamepadButton_Click" FontSize="10"/>
-                            <Button x:Name="Btn_R2" Content="R2" Style="{StaticResource CircularBtnStyle}" Width="65" Height="24" Canvas.Left="312" Canvas.Top="13" Click="GamepadButton_Click" FontSize="10"/>
+                            <Button x:Name="Btn_L2" Content="L2" Style="{StaticResource CircularBtnStyle}" Width="65" Height="24" Canvas.Left="118" Canvas.Top="0" Click="GamepadButton_Click" FontSize="10"/>
+                            <Button x:Name="Btn_R2" Content="R2" Style="{StaticResource CircularBtnStyle}" Width="65" Height="24" Canvas.Left="320" Canvas.Top="0" Click="GamepadButton_Click" FontSize="10"/>
 
                             <!-- L1 & R1 (Bumpers) -->
-                            <Button x:Name="Btn_L1" Content="L1" Style="{StaticResource CircularBtnStyle}" Width="65" Height="24" Canvas.Left="118" Canvas.Top="40" Click="GamepadButton_Click"/>
-                            <Button x:Name="Btn_R1" Content="R1" Style="{StaticResource CircularBtnStyle}" Width="65" Height="24" Canvas.Left="312" Canvas.Top="40" Click="GamepadButton_Click"/>
+                            <Button x:Name="Btn_L1" Content="L1" Style="{StaticResource CircularBtnStyle}" Width="65" Height="24" Canvas.Left="118" Canvas.Top="25" Click="GamepadButton_Click"/>
+                            <Button x:Name="Btn_R1" Content="R1" Style="{StaticResource CircularBtnStyle}" Width="65" Height="24" Canvas.Left="320" Canvas.Top="25" Click="GamepadButton_Click"/>
 
-                            <!-- D-Pad (links) -->
-                            <Button x:Name="Btn_DPAD_UP" Content="▲" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="120" Canvas.Top="105" Click="GamepadButton_Click" FontSize="12"/>
-                            <Button x:Name="Btn_DPAD_LEFT" Content="◀" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="100" Canvas.Top="127" Click="GamepadButton_Click" FontSize="12"/>
-                            <Button x:Name="Btn_DPAD_RIGHT" Content="▶" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="144" Canvas.Top="127" Click="GamepadButton_Click" FontSize="12"/>
-                            <Button x:Name="Btn_DPAD_DOWN" Content="▼" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="120" Canvas.Top="149" Click="GamepadButton_Click" FontSize="12"/>
+                            <!-- D-Pad (links): die vier Pfeile bilden EIN kompaktes Kreuz auf dem
+                                 hellgrauen Plus der Vorlage und liegen ohne eigene Kachelfläche im
+                                 Kreis (Fläche macht UpdateButtonsAppearance nicht mehr). Lage
+                                 gemessen: Plus-Mitte (0,3512|0,5234) im Bild, Armradius 14 DIP. -->
+                            <Button x:Name="Btn_DPAD_UP" Content="▲" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="128" Canvas.Top="119" Click="GamepadButton_Click" FontSize="12"/>
+                            <Button x:Name="Btn_DPAD_DOWN" Content="▼" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="128" Canvas.Top="147" Click="GamepadButton_Click" FontSize="12"/>
+                            <Button x:Name="Btn_DPAD_LEFT" Content="◀" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="114" Canvas.Top="133" Click="GamepadButton_Click" FontSize="12"/>
+                            <Button x:Name="Btn_DPAD_RIGHT" Content="▶" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="142" Canvas.Top="133" Click="GamepadButton_Click" FontSize="12"/>
 
-                            <!-- SELECT & START (Mitte) -->
-                            <Button x:Name="Btn_SELECT" Content="SELECT" Style="{StaticResource CircularBtnStyle}" Width="60" Height="20" Canvas.Left="198" Canvas.Top="120" Click="GamepadButton_Click" FontSize="9"/>
-                            <Button x:Name="Btn_START" Content="START" Style="{StaticResource CircularBtnStyle}" Width="60" Height="20" Canvas.Left="275" Canvas.Top="120" Click="GamepadButton_Click" FontSize="9"/>
+                            <!-- Mitte wie am echten Pad: HOME sitzt genau auf dem Xbox-Logo,
+                                 SELECT und START flankieren es als Back/Menu. -->
+                            <Button x:Name="Btn_HOME" Content="HOME" Style="{StaticResource CircularBtnStyle}" Width="50" Height="20" Canvas.Left="226" Canvas.Top="86" Click="GamepadButton_Click" FontSize="9"/>
+                            <Button x:Name="Btn_SELECT" Content="SELECT" Style="{StaticResource CircularBtnStyle}" Width="50" Height="20" Canvas.Left="178" Canvas.Top="86" Click="GamepadButton_Click" FontSize="9"/>
+                            <Button x:Name="Btn_START" Content="START" Style="{StaticResource CircularBtnStyle}" Width="50" Height="20" Canvas.Left="274" Canvas.Top="86" Click="GamepadButton_Click" FontSize="9"/>
 
                             <!-- Left Analog Stick (L3) with visual ring - Xbox 360 position -->
-                            <Canvas x:Name="Canvas_L3" Width="50" Height="50" Canvas.Left="245" Canvas.Top="150">
+                            <Canvas x:Name="Canvas_L3" Width="50" Height="50" Canvas.Left="112" Canvas.Top="67">
                                 <Ellipse x:Name="Ring_L3" Width="50" Height="50" Stroke="#45455D" StrokeThickness="2" Fill="#14141B"/>
                                 <Button x:Name="Btn_L3" Content="L3" Style="{StaticResource CircularBtnStyle}" Width="26" Height="26" Canvas.Left="12" Canvas.Top="12" Click="GamepadButton_Click" FontSize="9"/>
                             </Canvas>
 
                             <!-- Right Analog Stick (R3) with visual ring - Xbox 360 position -->
-                            <Canvas x:Name="Canvas_R3" Width="50" Height="50" Canvas.Left="385" Canvas.Top="150">
+                            <Canvas x:Name="Canvas_R3" Width="50" Height="50" Canvas.Left="287" Canvas.Top="139">
                                 <Ellipse x:Name="Ring_R3" Width="50" Height="50" Stroke="#45455D" StrokeThickness="2" Fill="#14141B"/>
                                 <Button x:Name="Btn_R3" Content="R3" Style="{StaticResource CircularBtnStyle}" Width="26" Height="26" Canvas.Left="12" Canvas.Top="12" Click="GamepadButton_Click" FontSize="9"/>
                             </Canvas>
 
-                            <!-- Action Buttons (A, B, X, Y) - rund -->
-                            <Button x:Name="Btn_Y" Content="Y" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="396" Canvas.Top="105" Click="GamepadButton_Click" FontSize="12"/>
-                            <Button x:Name="Btn_X" Content="X" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="368" Canvas.Top="127" Click="GamepadButton_Click" FontSize="12"/>
-                            <Button x:Name="Btn_B" Content="B" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="422" Canvas.Top="127" Click="GamepadButton_Click" FontSize="12"/>
-                            <Button x:Name="Btn_A" Content="A" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="396" Canvas.Top="149" Click="GamepadButton_Click" FontSize="12"/>
+                            <!-- Action Buttons (A, B, X, Y) - rund, als Raute um die Bildmitte der Tasten -->
+                            <Button x:Name="Btn_Y" Content="Y" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="357" Canvas.Top="51" Click="GamepadButton_Click" FontSize="12"/>
+                            <Button x:Name="Btn_X" Content="X" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="326" Canvas.Top="83" Click="GamepadButton_Click" FontSize="12"/>
+                            <Button x:Name="Btn_B" Content="B" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="389" Canvas.Top="83" Click="GamepadButton_Click" FontSize="12"/>
+                            <Button x:Name="Btn_A" Content="A" Style="{StaticResource CircularBtnStyle}" Width="24" Height="24" Canvas.Left="357" Canvas.Top="115" Click="GamepadButton_Click" FontSize="12"/>
                         </Canvas>
                     </Border>
                 </Grid>
@@ -577,6 +577,8 @@
                             <TextBox x:Name="TxtMappingName" FontSize="11" Background="Transparent" BorderThickness="0" Foreground="White" VerticalContentAlignment="Center" ToolTip="{Binding Mapping_NameHint}"/>
                         </Border>
 
+                        <CheckBox x:Name="ChkMappingToggle" Content="{Binding Mapping_ToggleLabel}" ToolTip="{Binding Mapping_ToggleHint}" FontSize="10" Foreground="White" Margin="0,0,0,8"/>
+
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -597,10 +599,24 @@
                     </StackPanel>
                 </ContentControl>
 
-                <TabControl x:Name="TabsRightPanel" Grid.Row="2" Style="{StaticResource DarkTabControlStyle}" SelectionChanged="TabsRightPanel_SelectionChanged">
-                    <TabItem Header="{Binding Tabs_Combinations}" Style="{StaticResource DarkTabItemStyle}">
-                        <Border Background="{DynamicResource SurfaceCardBrush}" BorderBrush="{DynamicResource BevelEdgeBrush}" BorderThickness="1" CornerRadius="6">
-                            <ListBox x:Name="ListMappings" Background="Transparent" BorderThickness="0" Margin="4" SelectionChanged="ListMappings_SelectionChanged">
+                <!-- Gespeicherte Kombinationen: Reiterleiste und der Reiter „Xbox 360 & HidHide"
+                     sind entfernt, damit die Liste den ganzen Bereich bekommt. Kein sichtbarer
+                     Regler: VerticalScrollBarVisibility="Hidden" rollt weiter mit dem Mausrad,
+                     zeigt aber keinen Balken; HorizontalContentAlignment streckt jede Karte auf
+                     dieselbe Breite (vorher unterschiedlich breit und rechts abgeschnitten). -->
+                <Grid Grid.Row="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="{Binding Mapping_ListTitle}" FontWeight="Bold" FontSize="12" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,6"/>
+
+                    <Border Grid.Row="1" Background="{DynamicResource SurfaceCardBrush}" BorderBrush="{DynamicResource BevelEdgeBrush}" BorderThickness="1" CornerRadius="6">
+                            <ListBox x:Name="ListMappings" Background="Transparent" BorderThickness="0" Margin="4"
+                                     HorizontalContentAlignment="Stretch"
+                                     ScrollViewer.VerticalScrollBarVisibility="Hidden"
+                                     SelectionChanged="ListMappings_SelectionChanged">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
                                     <Border Background="{DynamicResource SurfaceListCardBrush}" BorderBrush="{DynamicResource BevelEdgeBrush}" BorderThickness="1" CornerRadius="6" Padding="10,7" Margin="0,3">
@@ -633,6 +649,9 @@
                                                     </ItemsControl.ItemsPanel>
                                                 </ItemsControl>
                                                 <Button Content="✕" Click="BtnDeleteMapping_Click" Tag="{Binding}" Background="Transparent" Foreground="#EF4444" BorderThickness="0" Grid.Column="4" Padding="4,2" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="13"/>
+                                                <Border Grid.Column="3" Background="{DynamicResource SurfaceRaisedBrush}" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" CornerRadius="4" Padding="4,1" Margin="6,0,0,0" VerticalAlignment="Center" Visibility="{Binding Toggle, Converter={StaticResource BoolToVis}}">
+                                                    <TextBlock Text="{Binding DataContext.Mapping_ToggleBadge, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}" FontSize="9" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}"/>
+                                                </Border>
                                             </Grid>
                                             <TextBlock Grid.Row="1" Text="{Binding ActionName}" TextWrapping="Wrap" FontWeight="SemiBold" FontSize="12" Foreground="White" Margin="0,5,0,0" Visibility="{Binding HasName, Converter={StaticResource BoolToVis}}"/>
                                         </Grid>
@@ -640,12 +659,15 @@
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                             </ListBox>
-                        </Border>
-                    </TabItem>
-                    <TabItem x:Name="TabController" Header="{Binding Tabs_Controller}" Style="{StaticResource DarkTabItemStyle}">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel>
+                    </Border>
+                </Grid>
 
+                <!-- Xbox-360-Spiegelung und HidHide: auf Wunsch aus der Oberfläche entfernt.
+                     Die Bedienelemente bleiben bewusst verborgen im Fensterbaum, damit die
+                     Statuspflege und die Automatik im Code unverändert weiterlaufen (kein
+                     stiller Funktionsverlust); der Treiber-Zustand bleibt über das Licht in
+                     der Kopfzeile und den Game-Controller-Knopf erreichbar. -->
+                <StackPanel x:Name="PanelVigemHidhide" Grid.Row="2" Visibility="Collapsed">
                     <TextBlock Text="{Binding Vigem_Section}" FontSize="11" FontWeight="Bold" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,4" TextWrapping="Wrap"/>
 
                     <CheckBox x:Name="ChkVigemXboxMain" Content="{Binding Vigem_EnableTitle}" Checked="ChkVigemXboxMain_Changed" Unchecked="ChkVigemXboxMain_Changed" FontWeight="SemiBold" Foreground="White" FontSize="10" Margin="0,0,0,4"/>
@@ -676,10 +698,7 @@
                     <TextBlock Text="{Binding Hidhide_Step3}" FontSize="9" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="8,0,0,2"/>
                     <TextBlock Text="{Binding Hidhide_Note}" FontSize="9" Foreground="#F59E0B" TextWrapping="Wrap" Margin="8,0,0,0"/>
 
-                        </StackPanel>
-                        </ScrollViewer>
-                    </TabItem>
-                </TabControl>
+                </StackPanel>
 
                 <ScrollViewer Grid.Row="3" MaxHeight="120" VerticalScrollBarVisibility="Auto" Margin="0,2,0,0">
                 <StackPanel>

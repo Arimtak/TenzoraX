@@ -32,6 +32,7 @@ namespace TenzoraX
             { "R3", "R3" },
             { "SELECT", "⏵" },
             { "START", "⏭" },
+            { "HOME", "HOME" },
             { "LS_UP", "L-Stick ↑" },
             { "LS_DOWN", "L-Stick ↓" },
             { "LS_LEFT", "L-Stick ←" },
@@ -58,6 +59,13 @@ namespace TenzoraX
         /// ausgegeben – dafür ist die Text-Aktion (Text) da.
         /// </summary>
         public string? Name { get; set; }
+
+        /// <summary>
+        /// Umschalter: Die Kombination schaltet die Tasten-Ausgabe ein und wieder aus,
+        /// statt sie nur zu halten. Der erste Druck hält die Ausgabe-Tasten gedrückt,
+        /// der zweite lässt sie los. Bei Text-Aktionen ohne Wirkung – die tippen einmal.
+        /// </summary>
+        public bool Toggle { get; set; }
 
         public bool HasTextAction => !string.IsNullOrEmpty(Text);
         public bool HasName => !string.IsNullOrEmpty(Name);
@@ -176,12 +184,19 @@ namespace TenzoraX
             lock (_lock)
             {
                 _triggeredMappings.Clear();
+                _latchedMappings.Clear();
             }
         }
 
         private const string ProfileDirName = "Profiles";
         private MappingProfile _activeProfile = new();
+
+        /// <summary>Kombinationen, deren Combo gerade gedrückt ist (Flankenerkennung).</summary>
         private readonly HashSet<Mapping> _triggeredMappings = new();
+
+        /// <summary>Umschalter, deren Ausgabe gerade dauerhaft gedrückt ist.</summary>
+        private readonly HashSet<Mapping> _latchedMappings = new();
+
         private readonly object _lock = new();
 
         public MappingProfile ActiveProfile
@@ -308,6 +323,42 @@ namespace TenzoraX
                 Instance.ReleaseAllTriggered();
         }
 
+        /// <summary>
+        /// Lässt alle gehaltenen Tasten los – beim Beenden der App, damit keine Taste
+        /// systemweit hängen bleibt.
+        /// </summary>
+        public static void ReleaseAll() => Instance.ReleaseAllTriggered();
+
+        /// <summary>
+        /// Tasten, die das Programm gerade gedrückt hält: aktive Umschalter und
+        /// Kombinationen, deren Combo momentan gehalten wird. Reine Momentaufnahme für
+        /// die Anzeige im Tastaturfeld – es wird nichts gesendet oder verändert.
+        /// </summary>
+        public IReadOnlyCollection<string> ActiveOutputKeys
+        {
+            get
+            {
+                var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                lock (_lock)
+                {
+                    foreach (var mapping in _latchedMappings)
+                    {
+                        if (mapping.Action == null) continue;
+                        foreach (var key in mapping.Action) keys.Add(key);
+                    }
+
+                    foreach (var mapping in _triggeredMappings)
+                    {
+                        // Umschalter stehen schon in _latchedMappings; Text-Aktionen
+                        // halten keine Taste.
+                        if (mapping.Toggle || mapping.HasTextAction || mapping.Action == null) continue;
+                        foreach (var key in mapping.Action) keys.Add(key);
+                    }
+                }
+                return keys;
+            }
+        }
+
         private void ReleaseAllTriggered()
         {
             lock (_lock)
@@ -316,20 +367,99 @@ namespace TenzoraX
                 {
                     // Text-Aktionen werden nicht gehalten und brauchen kein KeyUp
                     if (mapping.HasTextAction) continue;
+                    // Umschalter halten ihre Tasten nicht über die Combo, sondern über
+                    // _latchedMappings – dort werden sie unten freigegeben.
+                    if (mapping.Toggle) continue;
                     if (mapping.Action == null || mapping.Action.Count == 0) continue;
-                    try
-                    {
-                        if (KeyOutputOverride != null)
-                            KeyOutputOverride(mapping.Action, true);
-                        else
-                            InputSimulator.SimulateKeyUp(mapping.Action);
-                    }
-                    catch (Exception ex)
-                    {
-                        App.LogApp("Hotkey-Release-Fehler (Pause): " + ex.Message);
-                    }
+                    ReleaseKeys(mapping.Action);
                 }
+
+                // Eingeschaltete Umschalter: ohne diese Freigabe bliebe ihre Taste nach
+                // Pause oder Profilwechsel dauerhaft gedrückt.
+                foreach (var mapping in _latchedMappings)
+                {
+                    if (mapping.Action == null || mapping.Action.Count == 0) continue;
+                    ReleaseKeys(mapping.Action);
+                }
+
                 _triggeredMappings.Clear();
+                _latchedMappings.Clear();
+            }
+        }
+
+        /// <summary>Lässt die Tasten eines Mappings los (KeyUp) – ohne zu werfen.</summary>
+        private static void ReleaseKeys(List<string> action)
+        {
+            try
+            {
+                if (KeyOutputOverride != null)
+                    KeyOutputOverride(action, true);
+                else
+                    InputSimulator.SimulateKeyUp(action);
+            }
+            catch (Exception ex)
+            {
+                App.LogApp("Hotkey-Release-Fehler (Pause): " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Gibt die Ausgabe eines Mappings aus: Tasten halten bzw. loslassen – beim
+        /// Drücken stattdessen eine Text-Aktion einmal tippen. Normales Halten und
+        /// Umschalter teilen sich diesen Weg, damit Sound und Latenzmessung gleich sind.
+        /// </summary>
+        private static void SendOutput(Mapping mapping, bool keyUp)
+        {
+            if (!keyUp && mapping.HasTextAction)
+            {
+                if (TextOutputOverride != null)
+                    TextOutputOverride(mapping.Text!);
+                else
+                    InputSimulator.SimulateText(mapping.Text!);
+                SoundManager.PlayConfirmation();
+                LatencyMonitor.RecordOutputDone();
+                return;
+            }
+
+            if (KeyOutputOverride != null)
+                KeyOutputOverride(mapping.Action, keyUp);
+            else if (keyUp)
+                InputSimulator.SimulateKeyUp(mapping.Action);
+            else
+                InputSimulator.SimulateKeyDown(mapping.Action);
+
+            if (keyUp) return;
+
+            if (KeyOutputOverride == null)
+                SoundManager.PlayConfirmation();
+            // Latenz messen: StateChanged → SendInput fertig (Poll-Thread)
+            LatencyMonitor.RecordOutputDone();
+        }
+
+        /// <summary>
+        /// Zeigt die Benachrichtigung zur ausgelösten Kombination: bei benannten
+        /// Kombinationen Combo + Name („LB + ↑ ➔ Steam Overlay"), bei Text-Aktionen ohne
+        /// Namen nur den ausgelösten Text. <paramref name="stateSuffix"/> hängt bei
+        /// Umschaltern „An“ bzw. „Aus“ an. BeginInvoke, damit der Poll-Thread nicht auf
+        /// die Oberfläche wartet.
+        /// </summary>
+        private static void NotifyOutput(Mapping mapping, string? stateSuffix = null)
+        {
+            try
+            {
+                var app = System.Windows.Application.Current;
+                if (app == null) return;
+
+                string combo = (mapping.HasTextAction && !mapping.HasName) ? "" : mapping.DisplayCombo;
+                string label = mapping.DisplayLabel;
+                if (!string.IsNullOrEmpty(stateSuffix))
+                    label += " – " + stateSuffix;
+
+                app.Dispatcher.BeginInvoke(() => NotificationManager.Show(combo, label));
+            }
+            catch (Exception ex)
+            {
+                App.LogApp("Notification-Fehler: " + ex.Message);
             }
         }
 
@@ -393,63 +523,64 @@ namespace TenzoraX
                         }
                     }
 
+                    // Umschalter: Die Kombination schaltet die Tasten-Ausgabe ein und wieder
+                    // aus. Nur der Druck zählt – das Loslassen beendet bloß die Flanke,
+                    // damit die Ausgabe-Tasten gedrückt bleiben.
+                    if (mapping.Toggle && !mapping.HasTextAction)
+                    {
+                        if (!allPressed)
+                        {
+                            _triggeredMappings.Remove(mapping);
+                            continue;
+                        }
+                        if (_triggeredMappings.Contains(mapping)) continue;
+
+                        _triggeredMappings.Add(mapping);
+                        bool on = !_latchedMappings.Contains(mapping);
+                        if (on)
+                            _latchedMappings.Add(mapping);
+                        else
+                            _latchedMappings.Remove(mapping);
+
+                        try
+                        {
+                            // an → KeyDown, aus → KeyUp
+                            SendOutput(mapping, keyUp: !on);
+                            // Beim Ausschalten den Bestätigungston nachholen: SendOutput
+                            // spielt ihn nur beim Drücken, Rückmeldung braucht aber
+                            // jeder Zustandswechsel.
+                            if (!on)
+                                SoundManager.PlayConfirmation();
+                        }
+                        catch (Exception ex)
+                        {
+                            App.LogApp("Umschalter-Ausgabe-Fehler: " + ex.Message);
+                        }
+                        NotifyOutput(mapping, on ? LanguageManager.Instance.Mapping_On : LanguageManager.Instance.Mapping_Off);
+                        continue;
+                    }
+
                     if (allPressed)
                     {
                         if (!_triggeredMappings.Contains(mapping))
                         {
                             _triggeredMappings.Add(mapping);
-                            string combo = mapping.DisplayCombo;
-                            string label = mapping.DisplayLabel;
-                            bool isText = mapping.HasTextAction;
-                            bool hasName = mapping.HasName;
                             // Trigger – synchron auf dem Poll-Thread. Task.Run
                             // würde die Reihenfolge KeyDown→KeyUp unter ThreadPool-Last
                             // nicht garantieren (KeyUp könnte vor KeyDown ausgeführt
                             // werden → Taste bleibt hängen).
                             try
                             {
-                                if (isText)
-                                {
-                                    // Text-Aktion: einmalig tippen (kein Halten/Loslassen)
-                                    if (TextOutputOverride != null)
-                                        TextOutputOverride(mapping.Text!);
-                                    else
-                                        InputSimulator.SimulateText(mapping.Text!);
-                                    SoundManager.PlayConfirmation();
-                                }
-                                else if (KeyOutputOverride != null)
-                                {
-                                    KeyOutputOverride(mapping.Action, false);
-                                }
-                                else
-                                {
-                                    InputSimulator.SimulateKeyDown(mapping.Action);
-                                    SoundManager.PlayConfirmation();
-                                }
+                                SendOutput(mapping, keyUp: false);
                             }
                             catch (Exception ex)
                             {
                                 App.LogApp("Hotkey-Ausgabe-Fehler: " + ex.Message);
                             }
-                            // Latenz messen: StateChanged → SendInput fertig (Poll-Thread)
-                            LatencyMonitor.RecordOutputDone();
                             // Benachrichtigung: bei benannten Kombinationen Combo + Name
                             // zeigen („LB + ↑ ➔ Steam Overlay“). Bei Text-Aktionen ohne
                             // Namen nur den ausgelösten Text zeigen, sonst wie bisher.
-                            try
-                            {
-                                var app = System.Windows.Application.Current;
-                                if (app != null)
-                                {
-                                    // BeginInvoke statt Invoke: nicht den Poll-Thread blockieren
-                                    app.Dispatcher.BeginInvoke(() =>
-                                        NotificationManager.Show((isText && !hasName) ? "" : combo, label));
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                App.LogApp("Notification-Fehler: " + ex.Message);
-                            }
+                            NotifyOutput(mapping);
                         }
                     }
                     else
@@ -462,10 +593,7 @@ namespace TenzoraX
                             // Trigger key up – synchron, siehe KeyDown
                             try
                             {
-                                if (KeyOutputOverride != null)
-                                    KeyOutputOverride(mapping.Action, true);
-                                else
-                                    InputSimulator.SimulateKeyUp(mapping.Action);
+                                SendOutput(mapping, keyUp: true);
                             }
                             catch (Exception ex)
                             {

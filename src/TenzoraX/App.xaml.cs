@@ -100,6 +100,12 @@ public partial class App : System.Windows.Application
             LogApp("ERROR: Unobserved Task exception: " + e.Exception.Message);
             e.SetObserved();
         };
+
+        // Beim Prozessende alle gehaltenen Tasten loslassen – auch bei Environment.Exit
+        // (Neustart als Administrator, Update), das nicht durch OnExit läuft. Eine per
+        // SendInput gedrückte Taste – besonders die eines Umschalters – bliebe sonst im
+        // ganzen System hängen, bis sie jemand physisch drückt.
+        AppDomain.CurrentDomain.ProcessExit += (s, e) => ProfileManager.ReleaseAll();
     }
 
     protected override void OnStartup(StartupEventArgs e)

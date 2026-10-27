@@ -521,5 +521,243 @@ namespace TenzoraX.Tests
             Assert.NotNull(loaded);
             Assert.Equal("hi 👋", loaded!.Mappings[0].Text);
         }
+
+        #region Umschalter (Toggle)
+
+        private void SetToggleProfile(string[] combo, string[] action)
+        {
+            ProfileManager.Instance.ActiveProfile = new MappingProfile
+            {
+                Name = "Test",
+                Mappings = new List<Mapping>
+                {
+                    new Mapping { Combo = combo.ToList(), Action = action.ToList(), Toggle = true }
+                }
+            };
+        }
+
+        [Fact]
+        public void Toggle_FirstPress_HoldsKeys()
+        {
+            SetToggleProfile(new[] { "SELECT", "START" }, new[] { "F16" });
+
+            ProfileManager.Instance.ProcessControllerInput(new List<string> { "SELECT", "START" });
+
+            Assert.Single(_events);
+            Assert.False(Last!.IsDown);
+            Assert.Equal(new[] { "F16" }, Last.Keys);
+        }
+
+        [Fact]
+        public void Toggle_ReleasingCombo_KeepsKeysHeld()
+        {
+            SetToggleProfile(new[] { "SELECT", "START" }, new[] { "F16" });
+
+            ProfileManager.Instance.ProcessControllerInput(new List<string> { "SELECT", "START" });
+            ProfileManager.Instance.ProcessControllerInput(new List<string>());
+
+            // Kein KeyUp: die Taste bleibt gedrückt, obwohl die Kombination losgelassen ist
+            Assert.Single(_events);
+        }
+
+        [Fact]
+        public void Toggle_SecondPress_ReleasesKeys()
+        {
+            SetToggleProfile(new[] { "SELECT", "START" }, new[] { "F16" });
+
+            ProfileManager.Instance.ProcessControllerInput(new List<string> { "SELECT", "START" }); // an
+            ProfileManager.Instance.ProcessControllerInput(new List<string>());                      // loslassen
+            ProfileManager.Instance.ProcessControllerInput(new List<string> { "SELECT", "START" });  // aus
+
+            Assert.Equal(2, _events.Count);
+            Assert.True(_events[1].IsDown);
+            Assert.Equal(new[] { "F16" }, _events[1].Keys);
+        }
+
+        [Fact]
+        public void Toggle_ThirdPress_HoldsAgain()
+        {
+            SetToggleProfile(new[] { "SELECT", "START" }, new[] { "F16" });
+
+            ProfileManager.Instance.ProcessControllerInput(new List<string> { "SELECT", "START" }); // an
+            ProfileManager.Instance.ProcessControllerInput(new List<string>());                      // loslassen
+            ProfileManager.Instance.ProcessControllerInput(new List<string> { "SELECT", "START" });  // aus
+            ProfileManager.Instance.ProcessControllerInput(new List<string>());                      // loslassen
+            ProfileManager.Instance.ProcessControllerInput(new List<string> { "SELECT", "START" });  // wieder an
+
+            Assert.Equal(3, _events.Count);
+            Assert.False(_events[0].IsDown);
+            Assert.True(_events[1].IsDown);
+            Assert.False(_events[2].IsDown);
+        }
+
+        [Fact]
+        public void Toggle_HoldingCombo_TogglesOnlyOnce()
+        {
+            SetToggleProfile(new[] { "SELECT", "START" }, new[] { "F16" });
+
+            // Kombination bleibt über mehrere Polls gedrückt → nur ein Umschaltvorgang
+            for (int i = 0; i < 5; i++)
+                ProfileManager.Instance.ProcessControllerInput(new List<string> { "SELECT", "START" });
+
+            Assert.Single(_events);
+        }
+
+        [Fact]
+        public void ActiveOutputKeys_ToggleOn_ListsHeldKeys()
+        {
+            SetToggleProfile(new[] { "SELECT", "START" }, new[] { "F16" });
+
+            // Aus: es wird nichts gehalten
+            Assert.Empty(ProfileManager.Instance.ActiveOutputKeys);
+
+            // Erster Druck schaltet ein – die Taste bleibt auch nach dem Loslassen gehalten
+            ProfileManager.Instance.ProcessControllerInput(new List<string> { "SELECT", "START" });
+            ProfileManager.Instance.ProcessControllerInput(new List<string>());
+            Assert.Equal(new[] { "F16" }, ProfileManager.Instance.ActiveOutputKeys);
+
+            // Zweiter Druck schaltet aus – die Anzeige muss wieder leer sein
+            ProfileManager.Instance.ProcessControllerInput(new List<string> { "SELECT", "START" });
+            ProfileManager.Instance.ProcessControllerInput(new List<string>());
+            Assert.Empty(ProfileManager.Instance.ActiveOutputKeys);
+        }
+
+        [Fact]
+        public void ActiveOutputKeys_HeldCombo_ListsKeysOnlyWhileHeld()
+        {
+            SetProfile((new[] { "L1", "SELECT" }, new[] { "SHIFT", "TAB" }));
+
+            ProfileManager.Instance.ProcessControllerInput(new List<string> { "L1", "SELECT" });
+            Assert.Equal(new[] { "SHIFT", "TAB" },
+                ProfileManager.Instance.ActiveOutputKeys.OrderBy(k => k));
+
+            ProfileManager.Instance.ProcessControllerInput(new List<string>());
+            Assert.Empty(ProfileManager.Instance.ActiveOutputKeys);
+        }
+
+        [Fact]
+        public void ActiveOutputKeys_TextAction_ListsNothing()
+        {
+            ProfileManager.Instance.ActiveProfile = new MappingProfile
+            {
+                Name = "Text",
+                Mappings = new List<Mapping>
+                {
+                    new Mapping { Combo = new List<string> { "LB" }, Text = "gg" }
+                }
+            };
+
+            var typed = new List<string>();
+            ProfileManager.TextOutputOverride = t => typed.Add(t);
+            try
+            {
+                ProfileManager.Instance.ProcessControllerInput(new List<string> { "LB" });
+
+                // Text-Aktionen halten keine Taste → Anzeige bleibt leer
+                Assert.Equal(new[] { "gg" }, typed);
+                Assert.Empty(ProfileManager.Instance.ActiveOutputKeys);
+            }
+            finally
+            {
+                ProfileManager.TextOutputOverride = null;
+            }
+        }
+
+        [Fact]
+        public void Toggle_Pause_ReleasesLatchedKeys()
+        {
+            SetToggleProfile(new[] { "SELECT", "START" }, new[] { "F16" });
+
+            ProfileManager.Instance.ProcessControllerInput(new List<string> { "SELECT", "START" });
+            ProfileManager.Instance.ProcessControllerInput(new List<string>());
+            Assert.Single(_events); // nur KeyDown
+
+            ProfileManager.SetPaused(true);
+
+            Assert.Equal(2, _events.Count);
+            Assert.True(_events[1].IsDown);
+            Assert.Equal(new[] { "F16" }, _events[1].Keys);
+
+            ProfileManager.SetPaused(false);
+        }
+
+        [Fact]
+        public void Toggle_ProfileSwitch_ReleasesLatchedKeys()
+        {
+            SetToggleProfile(new[] { "SELECT", "START" }, new[] { "F16" });
+
+            ProfileManager.Instance.ProcessControllerInput(new List<string> { "SELECT", "START" });
+            ProfileManager.Instance.ProcessControllerInput(new List<string>());
+            Assert.Single(_events);
+
+            // Profilwechsel, während die Kombination NICHT gehalten wird: die
+            // festgehaltene Taste muss trotzdem losgelassen werden
+            ProfileManager.Instance.SaveProfile(new MappingProfile
+            {
+                Name = "Other",
+                Mappings = new List<Mapping>
+                {
+                    new Mapping { Combo = new List<string> { "A" }, Action = new List<string> { "F14" } }
+                }
+            });
+            ProfileManager.Instance.LoadProfileByName("Other");
+
+            Assert.Equal(2, _events.Count);
+            Assert.True(_events[1].IsDown);
+            Assert.Equal(new[] { "F16" }, _events[1].Keys);
+        }
+
+        [Fact]
+        public void Toggle_TextAction_StillTypesOncePerPress()
+        {
+            // Text-Aktionen werden nicht gehalten – der Umschalter darf dort nichts hängen lassen
+            ProfileManager.Instance.ActiveProfile = new MappingProfile
+            {
+                Name = "Test",
+                Mappings = new List<Mapping>
+                {
+                    new Mapping { Combo = new List<string> { "A" }, Text = "hi", Toggle = true }
+                }
+            };
+
+            var typed = new List<string>();
+            ProfileManager.TextOutputOverride = t => typed.Add(t);
+
+            try
+            {
+                ProfileManager.Instance.ProcessControllerInput(new List<string> { "A" });
+                ProfileManager.Instance.ProcessControllerInput(new List<string>());
+                ProfileManager.Instance.ProcessControllerInput(new List<string> { "A" });
+
+                Assert.Equal(new[] { "hi", "hi" }, typed);
+                Assert.Empty(_events); // keine Tastenausgabe
+            }
+            finally
+            {
+                ProfileManager.TextOutputOverride = null;
+            }
+        }
+
+        [Fact]
+        public void Toggle_SurvivesProfileRoundTrip()
+        {
+            ProfileManager.Instance.SaveProfile(new MappingProfile
+            {
+                Name = "ToggleRoundTrip",
+                Mappings = new List<Mapping>
+                {
+                    new Mapping { Combo = new List<string> { "A" }, Action = new List<string> { "F16" }, Toggle = true },
+                    new Mapping { Combo = new List<string> { "B" }, Action = new List<string> { "F17" } }
+                }
+            });
+
+            var loaded = ProfileManager.Instance.LoadProfileByName("ToggleRoundTrip");
+
+            Assert.NotNull(loaded);
+            Assert.True(loaded!.Mappings[0].Toggle);
+            Assert.False(loaded.Mappings[1].Toggle);
+        }
+
+        #endregion
     }
 }

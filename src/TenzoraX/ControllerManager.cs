@@ -77,6 +77,19 @@ namespace TenzoraX
         [DllImport("xinput1_4.dll")]
         private static extern uint XInputGetState(uint dwUserIndex, out XINPUT_STATE pState);
 
+        /// <summary>
+        /// Erweiterter XInput-Aufruf (Ordnungszahl 100, „XInputGetStateEx“). Er ist
+        /// nicht dokumentiert, aber die einzige Quelle für den Guide-/Xbox-Knopf
+        /// (XINPUT_GUIDE). Fehlt der Einstiegspunkt in der geladenen DLL, fällt die App
+        /// dauerhaft auf den dokumentierten Aufruf zurück – dann bleibt HOME unsichtbar,
+        /// alles andere läuft unverändert weiter.
+        /// </summary>
+        [DllImport("xinput1_4.dll", EntryPoint = "#100")]
+        private static extern uint XInputGetStateEx(uint dwUserIndex, out XINPUT_STATE_EX pState);
+
+        /// <summary>null = noch nicht geprüft; false = der erweiterte Aufruf fehlt hier.</summary>
+        private static bool? _xinputExUsable;
+
         // 1-ms-Timer-Auflösung, damit Thread.Sleep(PollIntervalMs) wirklich ~4 ms
         // schläft (Standard-Windows-Timer sind nur ~15,6 ms genau).
         [DllImport("winmm.dll")]
@@ -103,6 +116,20 @@ namespace TenzoraX
             public short sThumbRY;
         }
 
+        /// <summary>
+        /// Zustand des erweiterten Aufrufs. Die Reservefelder sind Absicht: die
+        /// Erweiterung darf über die 16 dokumentierten Bytes hinaus schreiben, und ein
+        /// zu kleiner Puffer wäre eine Speicherbeschädigung.
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        private struct XINPUT_STATE_EX
+        {
+            public uint dwPacketNumber;
+            public XINPUT_GAMEPAD Gamepad;
+            public uint dwReserve1;
+            public uint dwReserve2;
+        }
+
         // XInput button masks
         private const ushort XINPUT_A = 0x1000;
         private const ushort XINPUT_B = 0x2000;
@@ -110,6 +137,8 @@ namespace TenzoraX
         private const ushort XINPUT_Y = 0x8000;
         private const ushort XINPUT_L1 = 0x0100;
         private const ushort XINPUT_R1 = 0x0200;
+        /// <summary>Guide-/Xbox-Knopf – nur über den erweiterten Aufruf sichtbar.</summary>
+        private const ushort XINPUT_GUIDE = 0x0400;
         private const ushort XINPUT_L3 = 0x0040;
         private const ushort XINPUT_R3 = 0x0080;
         private const ushort XINPUT_BACK = 0x0020;
@@ -118,6 +147,33 @@ namespace TenzoraX
         private const ushort XINPUT_DPAD_D = 0x0002;
         private const ushort XINPUT_DPAD_L = 0x0004;
         private const ushort XINPUT_DPAD_R = 0x0008;
+
+        /// <summary>
+        /// Übersetzt die Tastenmaske eines XInput-Zustands in die Programm-Namen, die
+        /// Oberfläche, Aufzeichnung und Kombinationen benutzen. HOME gehört ausdrücklich
+        /// dazu: das Guide-Bit ist im dokumentierten Aufruf immer 0 und kommt nur über
+        /// Ordnungszahl 100 – ohne Namen bliebe der Xbox-Knopf überall unsichtbar.
+        /// </summary>
+        internal static void AppendXInputButtons(ushort w, byte leftTrigger, byte rightTrigger, List<string> pressed)
+        {
+            if ((w & XINPUT_A) != 0) pressed.Add("A");
+            if ((w & XINPUT_B) != 0) pressed.Add("B");
+            if ((w & XINPUT_X) != 0) pressed.Add("X");
+            if ((w & XINPUT_Y) != 0) pressed.Add("Y");
+            if ((w & XINPUT_L1) != 0) pressed.Add("L1");
+            if ((w & XINPUT_R1) != 0) pressed.Add("R1");
+            if (leftTrigger > 30) pressed.Add("L2");
+            if (rightTrigger > 30) pressed.Add("R2");
+            if ((w & XINPUT_L3) != 0) pressed.Add("L3");
+            if ((w & XINPUT_R3) != 0) pressed.Add("R3");
+            if ((w & XINPUT_BACK) != 0) pressed.Add("SELECT");
+            if ((w & XINPUT_START) != 0) pressed.Add("START");
+            if ((w & XINPUT_GUIDE) != 0) pressed.Add("HOME");
+            if ((w & XINPUT_DPAD_U) != 0) pressed.Add("DPAD_UP");
+            if ((w & XINPUT_DPAD_D) != 0) pressed.Add("DPAD_DOWN");
+            if ((w & XINPUT_DPAD_L) != 0) pressed.Add("DPAD_LEFT");
+            if ((w & XINPUT_DPAD_R) != 0) pressed.Add("DPAD_RIGHT");
+        }
 
 
         // ============================================================
@@ -1318,17 +1374,9 @@ namespace TenzoraX
         // aktiven (physischen) Controller gelesen und mit wie vielen gedrückten Tasten.
         private DateTime _lastSourceInputAt = DateTime.MinValue;
         private int _lastSourcePressedCount;
-        private string _lastPressedSummary = "";
-        private string _lastAxesSummary = "";
 
         public DateTime LastSourceInputAtUtc => _lastSourceInputAt;
         public int LastSourcePressedCount => _lastSourcePressedCount;
-
-        /// <summary>Kurzfassung der zuletzt gedrückten Tasten, z.B. "A, B, LS_LEFT" (für die UI).</summary>
-        public string LastPressedSummary => _lastPressedSummary;
-
-        /// <summary>Kurzfassung der zuletzt gelesenen Stick-/Achsenwerte (für die UI).</summary>
-        public string LastAxesSummary => _lastAxesSummary;
 
         private void OnControllerState(object? sender, ControllerStateEventArgs e)
         {
@@ -1338,9 +1386,6 @@ namespace TenzoraX
             {
                 _lastSourceInputAt = DateTime.UtcNow;
                 _lastSourcePressedCount = e.PressedButtons?.Count ?? 0;
-                _lastPressedSummary = BuildPressedSummary(e.PressedButtons);
-                _lastAxesSummary = string.Format("LX={0:0.00} LY={1:0.00} RX={2:0.00} RY={3:0.00}",
-                    e.LeftStickX, e.LeftStickY, e.RightStickX, e.RightStickY);
             }
             if (!_vigemEnabled) return;
             // Synchron auf dem aufrufenden (Poll-)Thread spiegeln – kein Dispatcher-Umweg,
@@ -2824,19 +2869,6 @@ lock (_controllers)
             return sb.ToString();
         }
 
-        /// <summary>Baut eine kompakte Tastenliste für die UI, z.B. „A, B, LS_LEFT“.</summary>
-        private static string BuildPressedSummary(List<string>? pressed)
-        {
-            if (pressed == null || pressed.Count == 0) return "";
-            var seen = new System.Collections.Generic.HashSet<string>();
-            var parts = new List<string>();
-            foreach (var b in pressed)
-            {
-                if (seen.Add(b)) parts.Add(b);
-            }
-            return string.Join(", ", parts);
-        }
-
         /// <summary>Formatiert eine Zeitspanne kompakt, z.B. „0,3 s“, „1,2 min“, „3 h“.</summary>
         private static string FormatAge(TimeSpan d)
         {
@@ -2915,12 +2947,43 @@ lock (_controllers)
             }
         }
 
+        /// <summary>
+        /// Liest den XInput-Zustand samt Guide-Bit. Ob der erweiterte Einstiegspunkt
+        /// vorhanden ist, wird beim ersten Aufruf geprüft; danach gilt das Ergebnis für
+        /// die restliche Laufzeit (einmal vorhanden, verschwindet er nicht wieder).
+        /// </summary>
+        private static uint TryGetStateWithGuide(int slot, out XINPUT_STATE state)
+        {
+            state = default;
+            if (_xinputExUsable != false)
+            {
+                try
+                {
+                    uint exRc = XInputGetStateEx((uint)slot, out var exState);
+                    _xinputExUsable = true;
+                    state = new XINPUT_STATE
+                    {
+                        dwPacketNumber = exState.dwPacketNumber,
+                        Gamepad = exState.Gamepad
+                    };
+                    return exRc;
+                }
+                catch (Exception ex)
+                {
+                    _xinputExUsable = false;
+                    App.LogApp("XInput: erweiterter Aufruf (Ordnungszahl 100) nicht nutzbar – " +
+                               "HOME/Xbox-Knopf bleibt unsichtbar (" + ex.GetType().Name + ")");
+                }
+            }
+            return XInputGetState((uint)slot, out state);
+        }
+
         private void ReadXInput(ControllerInfo ctrl)
         {
             // Skip polling a slot that recently disconnected (driver teardown in progress)
             if (InCooldown(_xinputCooldownUntil, ctrl.SlotIndex)) return;
 
-            var rc = XInputGetState((uint)ctrl.SlotIndex, out var state);
+            var rc = TryGetStateWithGuide(ctrl.SlotIndex, out var state);
             if (rc != ERROR_SUCCESS)
             {
                 lock (_cooldownLock) { _xinputCooldownUntil[ctrl.SlotIndex] = DateTime.UtcNow + DisconnectCooldown; }
@@ -2951,25 +3014,8 @@ lock (_controllers)
             }                lock (_cooldownLock) { _xinputCooldownUntil.Remove(ctrl.SlotIndex); }
 
                 var g = state.Gamepad;
-            var w = g.wButtons;
             var pressed = new List<string>();
-
-            if ((w & XINPUT_A) != 0) pressed.Add("A");
-            if ((w & XINPUT_B) != 0) pressed.Add("B");
-            if ((w & XINPUT_X) != 0) pressed.Add("X");
-            if ((w & XINPUT_Y) != 0) pressed.Add("Y");
-            if ((w & XINPUT_L1) != 0) pressed.Add("L1");
-            if ((w & XINPUT_R1) != 0) pressed.Add("R1");
-            if (g.bLeftTrigger > 30) pressed.Add("L2");
-            if (g.bRightTrigger > 30) pressed.Add("R2");
-            if ((w & XINPUT_L3) != 0) pressed.Add("L3");
-            if ((w & XINPUT_R3) != 0) pressed.Add("R3");
-            if ((w & XINPUT_BACK) != 0) pressed.Add("SELECT");
-            if ((w & XINPUT_START) != 0) pressed.Add("START");
-            if ((w & XINPUT_DPAD_U) != 0) pressed.Add("DPAD_UP");
-            if ((w & XINPUT_DPAD_D) != 0) pressed.Add("DPAD_DOWN");
-            if ((w & XINPUT_DPAD_L) != 0) pressed.Add("DPAD_LEFT");
-            if ((w & XINPUT_DPAD_R) != 0) pressed.Add("DPAD_RIGHT");
+            AppendXInputButtons(g.wButtons, g.bLeftTrigger, g.bRightTrigger, pressed);
 
             float lx = Math.Clamp(g.sThumbLX / 32768f, -1f, 1f);
             float ly = Math.Clamp(g.sThumbLY / 32768f, -1f, 1f);

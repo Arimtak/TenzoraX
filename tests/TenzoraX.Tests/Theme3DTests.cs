@@ -4,49 +4,85 @@ using Xunit;
 namespace TenzoraX.Tests
 {
     /// <summary>
-    /// Die App soll immer in 3D starten – außer es wurde bewusst ein anderer Stil
-    /// gewählt und gespeichert; dann gilt dieser. Getestet wird die reine Leselogik,
-    /// ohne WPF-Anwendung (Application.Current ist in Tests null).
+    /// Die App startet im Standard-Stil – Shine (Wunsch vom 27.10.2026, vorher war 3D der
+    /// Standard). Ein anderer Stil gilt nur, wenn er in den Einstellungen **bewusst gewählt**
+    /// wurde, erkennbar an <c>"UiThemeUserChoice": true</c>. Ein allein gespeichertes "3d"
+    /// stammt aus der Zeit, als 3D der Standard war, und darf den neuen Standard nicht
+    /// blockieren. Getestet wird die reine Leselogik, ohne WPF-Anwendung
+    /// (Application.Current ist in Tests null).
     /// </summary>
     public class Theme3DTests
     {
         [Fact]
-        public void OhneConfig_StartetIn3D()
+        public void Standard_ist_Shine()
         {
-            Assert.Equal(Theme3D.ThreeD, Theme3D.ThemeFromConfigJson(null));
-            Assert.Equal(Theme3D.ThreeD, Theme3D.ThemeFromConfigJson(""));
-            Assert.Equal(Theme3D.ThreeD, Theme3D.ThemeFromConfigJson("   "));
+            Assert.Equal(Theme3D.Shine, Theme3D.Default);
+            Assert.Equal(Theme3D.Shine, Theme3D.Current);
         }
 
         [Fact]
-        public void ConfigOhneUiTheme_StartetIn3D()
+        public void OhneConfig_StartetImStandard()
         {
-            Assert.Equal(Theme3D.ThreeD, Theme3D.ThemeFromConfigJson("{ \"Language\": \"de\", \"SoundEnabled\": true }"));
+            Assert.Equal(Theme3D.Default, Theme3D.ThemeFromConfigJson(null));
+            Assert.Equal(Theme3D.Default, Theme3D.ThemeFromConfigJson(""));
+            Assert.Equal(Theme3D.Default, Theme3D.ThemeFromConfigJson("   "));
+        }
+
+        [Fact]
+        public void ConfigOhneTheme_StartetImStandard()
+        {
+            Assert.Equal(Theme3D.Default,
+                Theme3D.ThemeFromConfigJson("{ \"Language\": \"de\", \"SoundEnabled\": true }"));
         }
 
         [Theory]
         [InlineData("flat")]
         [InlineData("3d")]
         [InlineData("shine")]
-        public void GespeicherterStil_Gilt(string theme)
+        public void BewusstGewaehlterStil_Gilt(string theme)
         {
-            string json = "{ \"UiTheme\": \"" + theme + "\" }";
+            string json = "{ \"UiTheme\": \"" + theme + "\", \"UiThemeUserChoice\": true }";
             Assert.Equal(theme, Theme3D.ThemeFromConfigJson(json));
         }
 
         [Fact]
-        public void GespeicherterStil_WirdNormalisiert()
+        public void OhneKennzeichen_GiltDerStandard()
         {
-            Assert.Equal(Theme3D.Shine, Theme3D.ThemeFromConfigJson("{ \"UiTheme\": \"  SHINE \" }"));
-            Assert.Equal(Theme3D.ThreeD, Theme3D.ThemeFromConfigJson("{ \"UiTheme\": \"unbekannt\" }"));
+            // Der echte Fall: Die bestehende config.json trägt noch das damalige Standard-"3d"
+            // (mitgeschrieben von einer älteren Fassung) – ohne Kennzeichen zählt der Standard.
+            Assert.Equal(Theme3D.Default, Theme3D.ThemeFromConfigJson("{ \"UiTheme\": \"3d\" }"));
+            Assert.Equal(Theme3D.Default, Theme3D.ThemeFromConfigJson("{ \"UiTheme\": \"shine\" }"));
+            Assert.Equal(Theme3D.Default,
+                Theme3D.ThemeFromConfigJson("{ \"UiTheme\": \"3d\", \"UiThemeUserChoice\": false }"));
         }
 
         [Fact]
-        public void KaputteConfig_StartetIn3D()
+        public void GewaehlterStil_WirdNormalisiert()
         {
-            Assert.Equal(Theme3D.ThreeD, Theme3D.ThemeFromConfigJson("{ \"UiTheme\": "));
-            Assert.Equal(Theme3D.ThreeD, Theme3D.ThemeFromConfigJson("kein json"));
-            Assert.Equal(Theme3D.ThreeD, Theme3D.ThemeFromConfigJson("{ \"UiTheme\": 42 }"));
+            Assert.Equal(Theme3D.Shine,
+                Theme3D.ThemeFromConfigJson("{ \"UiTheme\": \"  SHINE \", \"UiThemeUserChoice\": true }"));
+            // Unbekannter Wert fällt auf den Standard zurück, nicht auf einen Zufallsstil.
+            Assert.Equal(Theme3D.Default,
+                Theme3D.ThemeFromConfigJson("{ \"UiTheme\": \"unbekannt\", \"UiThemeUserChoice\": true }"));
+        }
+
+        [Fact]
+        public void KaputteConfig_StartetImStandard()
+        {
+            Assert.Equal(Theme3D.Default, Theme3D.ThemeFromConfigJson("{ \"UiTheme\": "));
+            Assert.Equal(Theme3D.Default, Theme3D.ThemeFromConfigJson("kein json"));
+            Assert.Equal(Theme3D.Default, Theme3D.ThemeFromConfigJson("{ \"UiTheme\": 42 }"));
+            Assert.Equal(Theme3D.Default, Theme3D.ThemeFromConfigJson("{ \"UiThemeUserChoice\": \"ja\" }"));
+        }
+
+        [Fact]
+        public void Einstellungen_OhneWahlTragenDenStandard()
+        {
+            // Der Startwert des Modells muss zum Standard passen, sonst schreibt die erste
+            // Speicherung wieder einen anderen Stil in die config.json.
+            var settings = new AppSettings();
+            Assert.Equal(Theme3D.Default, settings.UiTheme);
+            Assert.False(settings.UiThemeUserChoice);
         }
     }
 }

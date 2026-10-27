@@ -22,8 +22,14 @@ namespace TenzoraX
         public const string ThreeD = "3d";
         public const string Shine = "shine";
 
+        /// <summary>
+        /// Stil, mit dem die App startet, wenn der Nutzer keinen bewusst gewählt hat:
+        /// Shine (3D mit Glanzkante). Gewünscht am 27.10.2026; vorher war 3D der Standard.
+        /// </summary>
+        public const string Default = Shine;
+
         /// <summary>Aktiver Stil (normalisiert: flat | 3d | shine).</summary>
-        public static string Current { get; private set; } = ThreeD;
+        public static string Current { get; private set; } = Default;
 
         /// <summary>Zuletzt wirklich angewendeter Stil (null = noch keiner).</summary>
         private static string? _applied;
@@ -36,34 +42,52 @@ namespace TenzoraX
             switch ((theme ?? "").Trim().ToLowerInvariant())
             {
                 case Flat: return Flat;
+                // 3D muss ausdrücklich aufgeführt sein: vorher war es der Default-Zweig,
+                // seit Shine der Standard ist, fiele "3d" sonst auf Shine zurück.
+                case ThreeD: return ThreeD;
                 case Shine: return Shine;
-                default: return ThreeD;
+                default: return Default;
             }
         }
 
         /// <summary>
-        /// Liest den gespeicherten Stil aus dem Inhalt der config.json. Fehlt der
-        /// Eintrag, ist er leer oder ist die Datei kaputt, gilt 3D – die App startet
-        /// damit immer in 3D, sofern niemand bewusst etwas anderes gespeichert hat.
+        /// Liest den beim Start anzuwendenden Stil aus dem Inhalt der config.json.
+        ///
+        /// Regel: Es gilt nur eine **bewusste Wahl** des Nutzers (Einstellungen →
+        /// 🎨 DESIGN), erkennbar am Kennzeichen <c>"UiThemeUserChoice": true</c>.
+        /// Ohne Datei, ohne Wahl, bei unbekanntem Wert oder kaputtem JSON gilt der
+        /// Standard (<see cref="Default"/>, also Shine).
+        ///
+        /// Warum das Kennzeichen nötig ist (am echten Profil gemessen): Früher war 3D der
+        /// Standard und wurde beim Speichern mitgeschrieben – ein gespeichertes "3d" allein
+        /// sagt also nicht, ob es gewählt wurde. Ohne Kennzeichen wäre der neue Standard bei
+        /// jeder bestehenden Installation nie sichtbar geworden.
         /// </summary>
         public static string ThemeFromConfigJson(string? json)
         {
-            if (string.IsNullOrWhiteSpace(json)) return ThreeD;
+            if (string.IsNullOrWhiteSpace(json)) return Default;
             try
             {
                 using var doc = System.Text.Json.JsonDocument.Parse(json);
-                if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object &&
-                    doc.RootElement.TryGetProperty("UiTheme", out var element) &&
-                    element.ValueKind == System.Text.Json.JsonValueKind.String)
+                if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object)
                 {
-                    return Normalize(element.GetString());
+                    bool chosen =
+                        doc.RootElement.TryGetProperty("UiThemeUserChoice", out var flag) &&
+                        flag.ValueKind == System.Text.Json.JsonValueKind.True;
+
+                    if (chosen &&
+                        doc.RootElement.TryGetProperty("UiTheme", out var element) &&
+                        element.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        return Normalize(element.GetString());
+                    }
                 }
             }
             catch
             {
                 // Beschädigte Datei: Standard statt Absturz beim Start.
             }
-            return ThreeD;
+            return Default;
         }
 
         public static void Apply(string? theme)

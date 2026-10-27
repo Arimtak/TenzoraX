@@ -149,6 +149,9 @@ public partial class SettingsWindow : Window
             return;
 
         _settings.UiTheme = theme;
+        // Ab jetzt gilt die Wahl beim Start – ohne dieses Kennzeichen würde der Standard
+        // (Shine) den gespeicherten Wert bei jedem Start wieder überschreiben.
+        _settings.UiThemeUserChoice = true;
         Theme3D.Apply(theme);
         SaveNow();
     }
